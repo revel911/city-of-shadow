@@ -73,11 +73,11 @@ async function getPlayerData(folderId) {
     const files = await driveList(folderId);
 
     const sheetFiles = files
-      .filter(f => /^character\s*sheet/i.test(f.name) && f.mimeType === 'application/vnd.google-apps.document')
+      .filter(f => /character\s*sheet/i.test(f.name) && f.mimeType === 'application/vnd.google-apps.document')
       .sort((a, b) => (b.modifiedTime || '').localeCompare(a.modifiedTime || '')); // newest first
 
     const storyFiles = files
-      .filter(f => /^story\s*thread/i.test(f.name) && f.mimeType === 'application/vnd.google-apps.document')
+      .filter(f => /story\s*thread/i.test(f.name) && f.mimeType === 'application/vnd.google-apps.document')
       .sort((a, b) => (a.modifiedTime || '').localeCompare(b.modifiedTime || '')); // oldest first
 
     const [sheetTexts, storyTexts] = await Promise.all([
@@ -635,7 +635,11 @@ document.addEventListener('click', e => {
   if (scrollEl) {
     e.preventDefault();
     const target = document.getElementById(scrollEl.dataset.scrollTo);
-    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (target) {
+      const navHeight = document.getElementById('top-nav').offsetHeight;
+      const y = target.getBoundingClientRect().top + window.scrollY - navHeight - 12;
+      window.scrollTo({ top: y, behavior: 'smooth' });
+    }
     return;
   }
   const el = e.target.closest('[data-nav]');
