@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>City of Shadow</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <nav id="top-nav">
+    <a class="nav-logo" href="#/">
+      <span class="nav-logo-icon">⬡</span>
+      <span class="nav-logo-text">City of Shadow</span>
+    </a>
+    <div class="nav-divider"></div>
+    <ul class="nav-links">
+      <li><a href="#/" data-route="/">Summary</a></li>
+      <li><a href="#/characters" data-route="/characters">Characters</a></li>
+      <li><a href="#/npcs" data-route="/npcs">NPCs</a></li>
+      <li><a href="#/city" data-route="/city">City</a></li>
+      <li><a href="#/events" data-route="/events">Events</a></li>
+    </ul>
+    <span class="nav-refresh" id="refresh-btn">↻ Refresh</span>
+  </nav>
+
+  <div id="app">
+    <aside id="side-nav"></aside>
+    <main id="content"></main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
