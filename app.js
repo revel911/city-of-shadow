@@ -68,7 +68,7 @@ async function getPlayerFolders() {
   });
 }
 
-async function getPlayerData(folderId) {
+async function getPlayerData(folderId, playerName = '') {
   return cached(`player-${folderId}`, async () => {
     const files = await driveList(folderId);
 
@@ -80,7 +80,18 @@ async function getPlayerData(folderId) {
       .filter(f => /story\s*thread/i.test(f.name) && f.mimeType === 'application/vnd.google-apps.document')
       .sort((a, b) => (a.modifiedTime || '').localeCompare(b.modifiedTime || '')); // oldest first
 
-    const sessionLogFile = findBestFile(files, /session log/i);
+    // Look for session log in player folder first; fall back to root folder
+    // (session logs are often stored at root with the character name prefixed)
+    const docFiles = files.filter(f => f.mimeType === 'application/vnd.google-apps.document');
+    let sessionLogFile = findBestFile(docFiles, /session log/i);
+    if (!sessionLogFile && playerName) {
+      const rootFiles = await getRootFiles();
+      const firstName = playerName.trim().split(/\s+/)[0];
+      sessionLogFile = findBestFile(
+        rootFiles.filter(f => f.mimeType === 'application/vnd.google-apps.document'),
+        new RegExp(firstName + '.*session\\s*log', 'i')
+      );
+    }
 
     const [sheetTexts, storyTexts, sessionLogText] = await Promise.all([
       Promise.all(sheetFiles.map(f => driveExport(f.id).catch(() => ''))),
@@ -185,7 +196,9 @@ async function getHubDocs() {
 // ── Parse helpers ────────────────────────────────────────────────────
 function parseStats(text) {
   return ['Blood','Heart','Mind','Spirit','Shadow'].flatMap(name => {
-    const m = text.match(new RegExp(`${name}[:\\s]+([+-]?\\d+)`, 'i'));
+    // Allow any non-newline, non-digit, non-sign chars between the label and value
+    // so formats like "Blood: +2", "Blood	2", "Blood** 0", "Blood (+1)" all match
+    const m = text.match(new RegExp(`${name}[^\\n\\d+-]*([+-]?\\d+)`, 'i'));
     return m ? [{ name, value: parseInt(m[1], 10) }] : [];
   });
 }
@@ -402,8 +415,8 @@ async function renderCharacters() {
   ]}]);
 
   const chars = await Promise.all(players.filter(p=>p.id&&p.name).map(async p => {
-    try { const d = await getPlayerData(p.id); return { ...p, ...d }; }
-    catch { return { ...p, sheet: '', sheetArchive: [], handoff: '', history: '' }; }
+    try { const d = await getPlayerData(p.id, p.name); return { ...p, ...d }; }
+    catch { return { ...p, sheet: '', sheetArchive: [], handoff: '', handoffTitle: '', history: '' }; }
   }));
 
   const cards = chars.map(c => {
@@ -482,7 +495,7 @@ async function renderCharacter(name) {
   if (!folder) { showError('Character not found', `No folder named "${esc(name)}" in Drive.`); return; }
 
   let sheet = '', sheetArchive = [], handoff = '', handoffTitle = '', history = '';
-  try { ({ sheet, sheetArchive, handoff, handoffTitle, history } = await getPlayerData(folder.id)); }
+  try { ({ sheet, sheetArchive, handoff, handoffTitle, history } = await getPlayerData(folder.id, name)); }
   catch (e) { showError('Could not load character data', e.message); return; }
 
   const archiveHtml = sheetArchive.length ? `
