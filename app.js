@@ -22,7 +22,7 @@ const DRIVE = 'https://www.googleapis.com/drive/v3';
 async function driveList(folderId) {
   const p = new URLSearchParams({
     q: `'${folderId}' in parents and trashed = false`,
-    fields: 'files(id,name,mimeType)',
+    fields: 'files(id,name,mimeType,modifiedTime)',
     orderBy: 'name',
     pageSize: '100',
     key: CONFIG.API_KEY,
@@ -44,6 +44,15 @@ function findFile(files, name) {
   return files.find(f => f.name === name) ?? null;
 }
 
+// Find the most recently modified file whose name matches a pattern
+function findBestFile(files, pattern) {
+  const matches = files.filter(f => pattern.test(f.name));
+  if (!matches.length) return null;
+  return matches.sort((a, b) =>
+    (b.modifiedTime || '').localeCompare(a.modifiedTime || '')
+  )[0];
+}
+
 // ── Data fetchers ────────────────────────────────────────────────────
 async function getRootFiles() {
   return cached('root', () => driveList(CONFIG.ROOT_FOLDER_ID));
@@ -62,13 +71,34 @@ async function getPlayerFolders() {
 async function getPlayerData(folderId) {
   return cached(`player-${folderId}`, async () => {
     const files = await driveList(folderId);
-    const sheetFile = findFile(files, 'Character Sheet');
-    const storyFile = findFile(files, 'Story Thread');
-    const [sheet, story] = await Promise.all([
-      sheetFile ? driveExport(sheetFile.id) : Promise.resolve(''),
-      storyFile ? driveExport(storyFile.id) : Promise.resolve(''),
+
+    const sheetFiles = files
+      .filter(f => /^character\s*sheet/i.test(f.name) && f.mimeType === 'application/vnd.google-apps.document')
+      .sort((a, b) => (b.modifiedTime || '').localeCompare(a.modifiedTime || '')); // newest first
+
+    const storyFiles = files
+      .filter(f => /^story\s*thread/i.test(f.name) && f.mimeType === 'application/vnd.google-apps.document')
+      .sort((a, b) => (a.modifiedTime || '').localeCompare(b.modifiedTime || '')); // oldest first
+
+    const [sheetTexts, storyTexts] = await Promise.all([
+      Promise.all(sheetFiles.map(f => driveExport(f.id).catch(() => ''))),
+      Promise.all(storyFiles.map(f => driveExport(f.id).catch(() => ''))),
     ]);
-    return { sheet, story };
+
+    // Most recent sheet = truth; older sheets = archive
+    const sheet = sheetTexts[0] || '';
+    const sheetArchive = sheetFiles.slice(1).map((f, i) => ({ name: f.name, content: sheetTexts[i + 1] || '' }));
+
+    // Handoff comes from the most recent story thread; history = that thread's history + all older threads
+    let handoff = '', history = '';
+    if (storyTexts.length) {
+      const { handoff: h, history: recentHistory } = splitStoryThread(storyTexts[storyTexts.length - 1]);
+      handoff = h;
+      const olderParts = storyTexts.slice(0, -1).reverse().filter(Boolean); // newer-old first
+      history = [recentHistory, ...olderParts].filter(Boolean).join('\n\n---\n\n');
+    }
+
+    return { sheet, sheetArchive, handoff, history };
   });
 }
 
@@ -83,16 +113,63 @@ async function getWorldBible() {
 async function getEventsLog() {
   return cached('events', async () => {
     const files = await getRootFiles();
-    const f = findFile(files, 'Public Events Log');
-    return f ? driveExport(f.id) : '';
+
+    // If there's an Events/ subfolder, aggregate all docs inside it (one per session)
+    // This is the recommended path: MC creates a new doc per session rather than editing the log
+    const eventsFolder = files.find(f =>
+      f.mimeType === 'application/vnd.google-apps.folder' && /^events$/i.test(f.name)
+    );
+    if (eventsFolder) {
+      const eventFiles = await driveList(eventsFolder.id);
+      const docs = eventFiles
+        .filter(f => f.mimeType === 'application/vnd.google-apps.document')
+        .sort((a, b) => (b.modifiedTime || '').localeCompare(a.modifiedTime || ''));
+      if (docs.length) {
+        const texts = await Promise.all(docs.map(f => driveExport(f.id).catch(() => '')));
+        return texts.filter(Boolean).join('\n\n---\n\n');
+      }
+    }
+
+    // Always also check the single Public Events Log doc — include it if it has real entries
+    const logFile = findBestFile(files, /public\s*events/i) || findBestFile(files, /^02\s*[—-]/);
+    if (logFile) {
+      const logText = await driveExport(logFile.id).catch(() => '');
+      // Exclude if it's still the template (contains the literal placeholder, not a real date)
+      if (logText && !/\[YYYY-MM-DD\]/.test(logText) && logText.trim().length > 150) {
+        parts.push(logText);
+      }
+    }
+
+    return parts.filter(Boolean).join('\n\n---\n\n');
   });
 }
 
 async function getWodFoundation() {
   return cached('wod', async () => {
     const files = await getRootFiles();
-    const f = findFile(files, 'WoD Foundation');
+    const f = findBestFile(files, /wod\s*foundation|world\s*of\s*darkness/i);
     return f ? driveExport(f.id) : '';
+  });
+}
+
+async function getHubDocs() {
+  return cached('hubs', async () => {
+    const files = await getRootFiles();
+    const hubsFolder = files.find(f =>
+      f.mimeType === 'application/vnd.google-apps.folder' && /^hubs$/i.test(f.name)
+    );
+    if (!hubsFolder) return [];
+
+    const hubFiles = await driveList(hubsFolder.id);
+    const docs = hubFiles
+      .filter(f => f.mimeType === 'application/vnd.google-apps.document')
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    return Promise.all(docs.map(async f => ({
+      name: f.name.replace(/^Hub\s*[—–-]\s*/i, ''), // strip "Hub — " prefix for display
+      rawName: f.name,
+      content: await driveExport(f.id).catch(() => ''),
+    })));
   });
 }
 
@@ -109,12 +186,6 @@ function parsePlaybook(text) {
   return m ? m[1].trim() : '';
 }
 
-function parseHandoff(story) {
-  const lines = story.split('\n');
-  const i = lines.findIndex(l => /handoff/i.test(l));
-  if (i === -1) return '';
-  return lines.slice(i + 1, i + 6).filter(Boolean).join(' ').slice(0, 200);
-}
 
 function recentLines(text, n = 8) {
   return text.split('\n')
@@ -122,6 +193,54 @@ function recentLines(text, n = 8) {
     .filter(l => l.length > 20 && !l.startsWith('#') && !l.startsWith('---'))
     .slice(-n)
     .reverse();
+}
+
+// ── Markdown section helpers ─────────────────────────────────────────
+
+// Extract only the H2+ sections whose title matches one of the given patterns
+function extractMarkdownSections(text, ...patterns) {
+  const lines = text.split('\n');
+  const out = [];
+  let capturing = false;
+  let captureDepth = 0;
+
+  for (const line of lines) {
+    const m = line.match(/^(#{1,6})\s+(.*)/);
+    if (m) {
+      const depth = m[1].length;
+      const title = m[2];
+      if (capturing && depth <= captureDepth) capturing = false;
+      if (!capturing && patterns.some(p => p.test(title))) {
+        capturing = true;
+        captureDepth = depth;
+      }
+    }
+    if (capturing) out.push(line);
+  }
+  return out.join('\n').trim();
+}
+
+// Return everything EXCEPT the H2+ sections whose title matches any of the given patterns
+function excludeMarkdownSections(text, ...patterns) {
+  const lines = text.split('\n');
+  const out = [];
+  let skipping = false;
+  let skipDepth = 0;
+
+  for (const line of lines) {
+    const m = line.match(/^(#{1,6})\s+(.*)/);
+    if (m) {
+      const depth = m[1].length;
+      const title = m[2];
+      if (skipping && depth <= skipDepth) skipping = false;
+      if (!skipping && patterns.some(p => p.test(title))) {
+        skipping = true;
+        skipDepth = depth;
+      }
+    }
+    if (!skipping) out.push(line);
+  }
+  return out.join('\n').trim();
 }
 
 // ── HTML helpers ─────────────────────────────────────────────────────
@@ -275,13 +394,17 @@ async function renderCharacters() {
 
   const chars = await Promise.all(players.filter(p=>p.id&&p.name).map(async p => {
     try { const d = await getPlayerData(p.id); return { ...p, ...d }; }
-    catch { return { ...p, sheet: '', story: '' }; }
+    catch { return { ...p, sheet: '', sheetArchive: [], handoff: '', history: '' }; }
   }));
 
   const cards = chars.map(c => {
-    const stats   = parseStats(c.sheet);
+    const stats    = parseStats(c.sheet);
     const playbook = parsePlaybook(c.sheet);
-    const handoff  = parseHandoff(c.story);
+    // Strip markdown syntax and code fences from handoff for the card preview
+    const handoffPreview = (c.handoff || '')
+      .replace(/```[\s\S]*?```/g, '').replace(/^#+\s.*/gm, '')
+      .split('\n').map(l => l.trim()).filter(l => l.length > 5)
+      .join(' ').slice(0, 200);
     return `
       <div class="char-card" data-nav="/characters/${encodeURIComponent(c.name)}">
         <div class="char-card-inner">
@@ -290,7 +413,7 @@ async function renderCharacters() {
             ${playbook ? `<div class="char-playbook">${esc(playbook)}</div>` : ''}
           </div>
           ${statPills(stats)}
-          ${handoff ? `<div class="char-handoff">&ldquo;${esc(handoff)}&rdquo;</div>` : ''}
+          ${handoffPreview ? `<div class="char-handoff">&ldquo;${esc(handoffPreview)}&rdquo;</div>` : ''}
           <div class="char-link">View Full Sheet &rarr;</div>
         </div>
       </div>`;
@@ -307,23 +430,26 @@ async function renderCharacters() {
 // ── Split story thread into handoff note + session history ───────────
 function splitStoryThread(text) {
   if (!text.trim()) return { handoff: '', history: '' };
-  const lines = text.split('\n');
 
-  // Find the first major section break after the opening content.
-  // The handoff note is at the top; older sessions follow after a separator.
+  // Prefer a named CURRENT HANDOFF NOTE section (the standard MC format)
+  const handoffSection = extractMarkdownSections(text, /current\s*handoff/i);
+  if (handoffSection) {
+    return {
+      handoff: handoffSection,
+      history: excludeMarkdownSections(text, /current\s*handoff/i).trim(),
+    };
+  }
+
+  // Fallback: cut at the first separator that isn't in the opening metadata block
+  const lines = text.split('\n');
   let splitIdx = lines.length;
-  for (let i = 3; i < lines.length; i++) {
+  for (let i = 5; i < lines.length; i++) {
     const t = lines[i].trim();
-    if (
-      t === '---' || t === '===' ||
-      /^#{1,3}\s+(session|entry|\d{4})/i.test(t) ||
-      /^-{3,}$/.test(t)
-    ) {
+    if (/^-{3,}$/.test(t) || t === '===' || /^#{1,3}\s+(session|entry|\d{4})/i.test(t)) {
       splitIdx = i;
       break;
     }
   }
-
   return {
     handoff: lines.slice(0, splitIdx).join('\n').trim(),
     history: lines.slice(splitIdx).join('\n').trim(),
@@ -346,11 +472,19 @@ async function renderCharacter(name) {
   const folder = players.find(p => p.name === name);
   if (!folder) { showError('Character not found', `No folder named "${esc(name)}" in Drive.`); return; }
 
-  let sheet = '', story = '';
-  try { ({ sheet, story } = await getPlayerData(folder.id)); }
+  let sheet = '', sheetArchive = [], handoff = '', history = '';
+  try { ({ sheet, sheetArchive, handoff, history } = await getPlayerData(folder.id)); }
   catch (e) { showError('Could not load character data', e.message); return; }
 
-  const { handoff, history } = splitStoryThread(story);
+  const archiveHtml = sheetArchive.length ? `
+    <details class="history-toggle">
+      <summary>Previous Sheets (${sheetArchive.length})</summary>
+      ${sheetArchive.map(({ name: n, content }) => `
+        <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
+          <p class="empty-note" style="margin-bottom:.5rem">${esc(n)}</p>
+          <div class="prose history-body">${md(content)}</div>
+        </div>`).join('')}
+    </details>` : '';
 
   const historyHtml = history ? `
     <details class="history-toggle">
@@ -367,6 +501,7 @@ async function renderCharacter(name) {
       <div class="card">
         <h2>Character Sheet</h2>
         <div class="prose">${md(sheet)}</div>
+        ${archiveHtml}
       </div>
       <div class="card">
         <h2>Current Handoff</h2>
@@ -376,14 +511,46 @@ async function renderCharacter(name) {
     </div>`;
 }
 
+// Sections of the World Bible that belong on the NPCs page, not the City page
+const NPC_SECTIONS = [/^factions/i, /^city.spanning/i, /^pc\s*roster/i];
+// Sections within Hub docs that belong on the NPCs page
+const HUB_NPC_SECTIONS = [/^resident\s*npcs/i, /^active\s*factions/i];
+
 // ── Page: NPCs ───────────────────────────────────────────────────────
 async function renderNpcs() {
-  setSideNav([{ title: 'NPCs', items: [{ href: '#/npcs', label: 'All NPCs' }] }]);
   showLoading('Consulting the city records\u2026');
 
-  let worldBible = '', wod = '';
-  try { [worldBible, wod] = await Promise.all([getWorldBible(), getWodFoundation()]); }
-  catch (e) { showError('Could not load NPC data', e.message, true); return; }
+  let worldBible = '', wod = '', hubDocs = [];
+  try {
+    [worldBible, wod, hubDocs] = await Promise.all([getWorldBible(), getWodFoundation(), getHubDocs()]);
+  } catch (e) { showError('Could not load NPC data', e.message, true); return; }
+
+  const activeHubs = hubDocs.filter(h => h.content.trim());
+
+  setSideNav([
+    { title: 'NPCs & Factions', items: [
+      { href: '#/npcs', label: 'City-Wide' },
+      { href: '#/city', label: '\u2190 City Overview' },
+    ]},
+    ...(activeHubs.length ? [{ title: 'By Hub', items: activeHubs.map(h => ({ href: '#/npcs', label: h.name })) }] : []),
+  ]);
+
+  const cityNpcs = extractMarkdownSections(worldBible, ...NPC_SECTIONS);
+
+  // Per-hub: extract only NPC/faction sections, labeled by hub name
+  const hubNpcCards = activeHubs.map(h => {
+    const npcSections = extractMarkdownSections(h.content, ...HUB_NPC_SECTIONS);
+    if (!npcSections) return '';
+    return `<div class="card"><h2>${esc(h.name)}</h2><div class="prose">${md(npcSections)}</div></div>`;
+  }).filter(Boolean).join('');
+
+  const wodCollapsible = wod ? `
+    <div class="card">
+      <details class="history-toggle">
+        <summary>World of Darkness Lore Reference</summary>
+        <div class="prose history-body">${md(wod)}</div>
+      </details>
+    </div>` : '';
 
   $content.innerHTML = `
     <div class="page-header">
@@ -392,21 +559,42 @@ async function renderNpcs() {
     </div>
     <div style="display:flex;flex-direction:column;gap:1.5rem;max-width:52rem">
       <div class="card">
-        <h2>World Bible</h2>
-        <div class="prose">${md(worldBible)}</div>
+        <h2>City-Wide Factions &amp; NPCs</h2>
+        <div class="prose">${cityNpcs ? md(cityNpcs) : '<p class="empty-note">No faction data found in World Bible.</p>'}</div>
       </div>
-      ${wod ? `<div class="card"><h2>WoD Foundation</h2><div class="prose">${md(wod)}</div></div>` : ''}
+      ${hubNpcCards}
+      ${wodCollapsible}
     </div>`;
 }
 
 // ── Page: City ───────────────────────────────────────────────────────
 async function renderCity() {
-  setSideNav([{ title: 'City Notes', items: [{ href: '#/city', label: 'Overview' }] }]);
   showLoading('Reading the world bible\u2026');
 
-  let worldBible = '', wod = '';
-  try { [worldBible, wod] = await Promise.all([getWorldBible(), getWodFoundation()]); }
-  catch (e) { showError('Could not load city data', e.message, true); return; }
+  let worldBible = '', hubDocs = [];
+  try {
+    [worldBible, hubDocs] = await Promise.all([getWorldBible(), getHubDocs()]);
+  } catch (e) { showError('Could not load city data', e.message, true); return; }
+
+  const activeHubs = hubDocs.filter(h => h.content.trim());
+
+  setSideNav([
+    { title: 'City Notes', items: [
+      { href: '#/city', label: 'Overview' },
+      { href: '#/npcs', label: 'Factions & NPCs \u2192' },
+    ]},
+    ...(activeHubs.length ? [{ title: 'Hubs', items: activeHubs.map(h => ({ href: '#/city', label: h.name })) }] : []),
+  ]);
+
+  // Strip faction/NPC sections — those live on the NPCs page
+  const cityContent = excludeMarkdownSections(worldBible, ...NPC_SECTIONS);
+
+  // Per-hub: show everything except the NPC/faction sections (those are on the NPCs page)
+  const hubCards = activeHubs.map(h => {
+    const hubCityContent = excludeMarkdownSections(h.content, ...HUB_NPC_SECTIONS);
+    if (!hubCityContent.trim()) return '';
+    return `<div class="card"><h2>${esc(h.name)}</h2><div class="prose">${md(hubCityContent)}</div></div>`;
+  }).filter(Boolean).join('');
 
   $content.innerHTML = `
     <div class="page-header">
@@ -414,8 +602,8 @@ async function renderCity() {
       <p>The shared world state. What is real, what is hidden, what is hunted.</p>
     </div>
     <div style="display:flex;flex-direction:column;gap:1.5rem;max-width:52rem">
-      <div class="card"><h2>World Bible</h2><div class="prose">${md(worldBible)}</div></div>
-      <div class="card"><h2>World of Darkness Lore</h2><div class="prose">${md(wod)}</div></div>
+      <div class="card"><h2>World Bible</h2><div class="prose">${md(cityContent)}</div></div>
+      ${hubCards}
     </div>`;
 }
 
