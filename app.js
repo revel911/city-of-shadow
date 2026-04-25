@@ -295,8 +295,9 @@ function setSideNav(sections) {
     <div class="side-section">
       <p class="side-section-title">${title}</p>
       <ul class="side-links">
-        ${items.map(({ href, label }) =>
-          `<li><a href="${href}" class="${route === href.replace('#','') ? 'active' : ''}">${esc(label)}</a></li>`
+        ${items.map(({ href, label, scrollTo }) => scrollTo
+          ? `<li><a href="#" data-scroll-to="${scrollTo}">${esc(label)}</a></li>`
+          : `<li><a href="${href}" class="${route === href.replace('#','') ? 'active' : ''}">${esc(label)}</a></li>`
         ).join('')}
       </ul>
     </div>`).join('');
@@ -360,7 +361,7 @@ async function renderSummary() {
         </div>
         <div class="card">
           <h2>Navigate</h2>
-          <div class="quick-link purple" data-nav="/city">City &amp; NPCs</div>
+          <div class="quick-link purple" data-nav="/city">City</div>
           <div class="quick-link purple" data-nav="/events">Public Events Log</div>
         </div>
       </div>
@@ -519,15 +520,18 @@ async function renderCity() {
     [worldBible, wod, hubDocs] = await Promise.all([getWorldBible(), getWodFoundation(), getHubDocs()]);
   } catch (e) { showError('Could not load city data', e.message, true); return; }
 
-  const activeHubs = hubDocs.filter(h => h.content.trim());
+  const activeHubs = hubDocs.filter(h => h.content.trim()).map(h => ({
+    ...h,
+    id: 'hub-' + h.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+  }));
 
   setSideNav([
-    { title: 'City & NPCs', items: [{ href: '#/city', label: 'Overview' }] },
-    ...(activeHubs.length ? [{ title: 'Hubs', items: activeHubs.map(h => ({ href: '#/city', label: h.name })) }] : []),
+    { title: 'City', items: [{ href: '#/city', label: 'Overview' }] },
+    ...(activeHubs.length ? [{ title: 'Hubs', items: activeHubs.map(h => ({ href: '#/city', label: h.name, scrollTo: h.id })) }] : []),
   ]);
 
   const hubCards = activeHubs.map(h =>
-    `<div class="card"><h2>${esc(h.name)}</h2><div class="prose">${md(h.content)}</div></div>`
+    `<div class="card" id="${h.id}"><h2>${esc(h.name)}</h2><div class="prose">${md(h.content)}</div></div>`
   ).join('');
 
   const wodCollapsible = wod ? `
@@ -625,8 +629,15 @@ document.querySelectorAll('[data-drawer-link]').forEach(a => {
   a.addEventListener('click', closeDrawer);
 });
 
-// ── Global click delegation (handles data-nav and quick-links) ───────
+// ── Global click delegation (handles data-nav, quick-links, scroll anchors) ─
 document.addEventListener('click', e => {
+  const scrollEl = e.target.closest('[data-scroll-to]');
+  if (scrollEl) {
+    e.preventDefault();
+    const target = document.getElementById(scrollEl.dataset.scrollTo);
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
   const el = e.target.closest('[data-nav]');
   if (el) { e.preventDefault(); navigate(el.dataset.nav); }
 });
