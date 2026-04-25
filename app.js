@@ -80,25 +80,34 @@ async function getPlayerData(folderId) {
       .filter(f => /story\s*thread/i.test(f.name) && f.mimeType === 'application/vnd.google-apps.document')
       .sort((a, b) => (a.modifiedTime || '').localeCompare(b.modifiedTime || '')); // oldest first
 
-    const [sheetTexts, storyTexts] = await Promise.all([
+    const sessionLogFile = findBestFile(files, /session log/i);
+
+    const [sheetTexts, storyTexts, sessionLogText] = await Promise.all([
       Promise.all(sheetFiles.map(f => driveExport(f.id).catch(() => ''))),
       Promise.all(storyFiles.map(f => driveExport(f.id).catch(() => ''))),
+      sessionLogFile?.id ? driveExport(sessionLogFile.id).catch(() => '') : Promise.resolve(''),
     ]);
 
     // Most recent sheet = truth; older sheets = archive
     const sheet = sheetTexts[0] || '';
     const sheetArchive = sheetFiles.slice(1).map((f, i) => ({ name: f.name, content: sheetTexts[i + 1] || '' }));
 
-    // Handoff comes from the most recent story thread; history = that thread's history + all older threads
-    let handoff = '', history = '';
-    if (storyTexts.length) {
+    let handoff = '', handoffTitle = '', history = '';
+    if (sessionLogText) {
+      // Use most recent session log file as the handoff source
+      handoff = sessionLogText;
+      handoffTitle = sessionLogFile.name;
+      // Story thread becomes pure history
+      history = storyTexts.filter(Boolean).reverse().join('\n\n---\n\n');
+    } else if (storyTexts.length) {
+      // Fallback: parse handoff from the most recent story thread
       const { handoff: h, history: recentHistory } = splitStoryThread(storyTexts[storyTexts.length - 1]);
       handoff = h;
       const olderParts = storyTexts.slice(0, -1).reverse().filter(Boolean); // newer-old first
       history = [recentHistory, ...olderParts].filter(Boolean).join('\n\n---\n\n');
     }
 
-    return { sheet, sheetArchive, handoff, history };
+    return { sheet, sheetArchive, handoff, handoffTitle, history };
   });
 }
 
@@ -472,8 +481,8 @@ async function renderCharacter(name) {
   const folder = players.find(p => p.name === name);
   if (!folder) { showError('Character not found', `No folder named "${esc(name)}" in Drive.`); return; }
 
-  let sheet = '', sheetArchive = [], handoff = '', history = '';
-  try { ({ sheet, sheetArchive, handoff, history } = await getPlayerData(folder.id)); }
+  let sheet = '', sheetArchive = [], handoff = '', handoffTitle = '', history = '';
+  try { ({ sheet, sheetArchive, handoff, handoffTitle, history } = await getPlayerData(folder.id)); }
   catch (e) { showError('Could not load character data', e.message); return; }
 
   const archiveHtml = sheetArchive.length ? `
@@ -505,6 +514,7 @@ async function renderCharacter(name) {
       </div>
       <div class="card">
         <h2>Current Handoff</h2>
+        ${handoffTitle ? `<p class="char-playbook" style="margin-bottom:.75rem">${esc(handoffTitle)}</p>` : ''}
         <div class="prose">${handoff ? md(handoff) : '<p class="empty-note">No handoff note found.</p>'}</div>
         ${historyHtml}
       </div>
@@ -526,7 +536,7 @@ async function renderCity() {
   }));
 
   setSideNav([
-    { title: 'City', items: [{ href: '#/city', label: 'Overview' }] },
+    { title: 'City', items: [{ href: '#', label: 'Overview', scrollTo: 'city-overview' }] },
     ...(activeHubs.length ? [{ title: 'Hubs', items: activeHubs.map(h => ({ href: '#/city', label: h.name, scrollTo: h.id })) }] : []),
   ]);
 
