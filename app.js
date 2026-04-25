@@ -360,8 +360,7 @@ async function renderSummary() {
         </div>
         <div class="card">
           <h2>Navigate</h2>
-          <div class="quick-link purple" data-nav="/city">World Bible</div>
-          <div class="quick-link purple" data-nav="/npcs">NPCs &amp; Factions</div>
+          <div class="quick-link purple" data-nav="/city">City &amp; NPCs</div>
           <div class="quick-link purple" data-nav="/events">Public Events Log</div>
         </div>
       </div>
@@ -511,38 +510,25 @@ async function renderCharacter(name) {
     </div>`;
 }
 
-// Sections of the World Bible that belong on the NPCs page, not the City page
-const NPC_SECTIONS = [/^factions/i, /^city.spanning/i, /^pc\s*roster/i];
-// Sections within Hub docs that belong on the NPCs page
-const HUB_NPC_SECTIONS = [/^resident\s*npcs/i, /^active\s*factions/i];
-
-// ── Page: NPCs ───────────────────────────────────────────────────────
-async function renderNpcs() {
-  showLoading('Consulting the city records\u2026');
+// ── Page: City ───────────────────────────────────────────────────────
+async function renderCity() {
+  showLoading('Reading the world bible\u2026');
 
   let worldBible = '', wod = '', hubDocs = [];
   try {
     [worldBible, wod, hubDocs] = await Promise.all([getWorldBible(), getWodFoundation(), getHubDocs()]);
-  } catch (e) { showError('Could not load NPC data', e.message, true); return; }
+  } catch (e) { showError('Could not load city data', e.message, true); return; }
 
   const activeHubs = hubDocs.filter(h => h.content.trim());
 
   setSideNav([
-    { title: 'NPCs & Factions', items: [
-      { href: '#/npcs', label: 'City-Wide' },
-      { href: '#/city', label: '\u2190 City Overview' },
-    ]},
-    ...(activeHubs.length ? [{ title: 'By Hub', items: activeHubs.map(h => ({ href: '#/npcs', label: h.name })) }] : []),
+    { title: 'City & NPCs', items: [{ href: '#/city', label: 'Overview' }] },
+    ...(activeHubs.length ? [{ title: 'Hubs', items: activeHubs.map(h => ({ href: '#/city', label: h.name })) }] : []),
   ]);
 
-  const cityNpcs = extractMarkdownSections(worldBible, ...NPC_SECTIONS);
-
-  // Per-hub: extract only NPC/faction sections, labeled by hub name
-  const hubNpcCards = activeHubs.map(h => {
-    const npcSections = extractMarkdownSections(h.content, ...HUB_NPC_SECTIONS);
-    if (!npcSections) return '';
-    return `<div class="card"><h2>${esc(h.name)}</h2><div class="prose">${md(npcSections)}</div></div>`;
-  }).filter(Boolean).join('');
+  const hubCards = activeHubs.map(h =>
+    `<div class="card"><h2>${esc(h.name)}</h2><div class="prose">${md(h.content)}</div></div>`
+  ).join('');
 
   const wodCollapsible = wod ? `
     <div class="card">
@@ -554,56 +540,13 @@ async function renderNpcs() {
 
   $content.innerHTML = `
     <div class="page-header">
-      <h1>NPCs &amp; Factions</h1>
-      <p>The city is full of players. Most of them will bleed you dry if you let them.</p>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:1.5rem;max-width:52rem">
-      <div class="card">
-        <h2>City-Wide Factions &amp; NPCs</h2>
-        <div class="prose">${cityNpcs ? md(cityNpcs) : '<p class="empty-note">No faction data found in World Bible.</p>'}</div>
-      </div>
-      ${hubNpcCards}
-      ${wodCollapsible}
-    </div>`;
-}
-
-// ── Page: City ───────────────────────────────────────────────────────
-async function renderCity() {
-  showLoading('Reading the world bible\u2026');
-
-  let worldBible = '', hubDocs = [];
-  try {
-    [worldBible, hubDocs] = await Promise.all([getWorldBible(), getHubDocs()]);
-  } catch (e) { showError('Could not load city data', e.message, true); return; }
-
-  const activeHubs = hubDocs.filter(h => h.content.trim());
-
-  setSideNav([
-    { title: 'City Notes', items: [
-      { href: '#/city', label: 'Overview' },
-      { href: '#/npcs', label: 'Factions & NPCs \u2192' },
-    ]},
-    ...(activeHubs.length ? [{ title: 'Hubs', items: activeHubs.map(h => ({ href: '#/city', label: h.name })) }] : []),
-  ]);
-
-  // Strip faction/NPC sections — those live on the NPCs page
-  const cityContent = excludeMarkdownSections(worldBible, ...NPC_SECTIONS);
-
-  // Per-hub: show everything except the NPC/faction sections (those are on the NPCs page)
-  const hubCards = activeHubs.map(h => {
-    const hubCityContent = excludeMarkdownSections(h.content, ...HUB_NPC_SECTIONS);
-    if (!hubCityContent.trim()) return '';
-    return `<div class="card"><h2>${esc(h.name)}</h2><div class="prose">${md(hubCityContent)}</div></div>`;
-  }).filter(Boolean).join('');
-
-  $content.innerHTML = `
-    <div class="page-header">
       <h1>Richmond, Virginia</h1>
       <p>The shared world state. What is real, what is hidden, what is hunted.</p>
     </div>
     <div style="display:flex;flex-direction:column;gap:1.5rem;max-width:52rem">
-      <div class="card"><h2>World Bible</h2><div class="prose">${md(cityContent)}</div></div>
+      <div class="card"><h2>World Bible</h2><div class="prose">${md(worldBible)}</div></div>
       ${hubCards}
+      ${wodCollapsible}
     </div>`;
 }
 
@@ -659,8 +602,6 @@ async function render() {
     await renderCharacters();
   } else if (route.startsWith('/characters/')) {
     await renderCharacter(decodeURIComponent(route.replace('/characters/', '')));
-  } else if (route === '/npcs') {
-    await renderNpcs();
   } else if (route === '/city') {
     await renderCity();
   } else if (route === '/events') {
