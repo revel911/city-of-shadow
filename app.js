@@ -553,7 +553,7 @@ async function renderCity() {
     </div>` : '';
 
   $content.innerHTML = `
-    <div class="page-header">
+    <div id="city-overview" class="page-header">
       <h1>Richmond, Virginia</h1>
       <p>The shared world state. What is real, what is hidden, what is hunted.</p>
     </div>
