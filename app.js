@@ -304,6 +304,32 @@ async function renderCharacters() {
     ${chars.length ? `<div class="char-grid">${cards}</div>` : '<p class="empty-note">No characters found in Drive.</p>'}`;
 }
 
+// ── Split story thread into handoff note + session history ───────────
+function splitStoryThread(text) {
+  if (!text.trim()) return { handoff: '', history: '' };
+  const lines = text.split('\n');
+
+  // Find the first major section break after the opening content.
+  // The handoff note is at the top; older sessions follow after a separator.
+  let splitIdx = lines.length;
+  for (let i = 3; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (
+      t === '---' || t === '===' ||
+      /^#{1,3}\s+(session|entry|\d{4})/i.test(t) ||
+      /^-{3,}$/.test(t)
+    ) {
+      splitIdx = i;
+      break;
+    }
+  }
+
+  return {
+    handoff: lines.slice(0, splitIdx).join('\n').trim(),
+    history: lines.slice(splitIdx).join('\n').trim(),
+  };
+}
+
 // ── Page: Single character ───────────────────────────────────────────
 async function renderCharacter(name) {
   showLoading(`Finding ${esc(name)}\u2026`);
@@ -324,6 +350,14 @@ async function renderCharacter(name) {
   try { ({ sheet, story } = await getPlayerData(folder.id)); }
   catch (e) { showError('Could not load character data', e.message); return; }
 
+  const { handoff, history } = splitStoryThread(story);
+
+  const historyHtml = history ? `
+    <details class="history-toggle">
+      <summary>Session History</summary>
+      <div class="prose history-body">${md(history)}</div>
+    </details>` : '';
+
   $content.innerHTML = `
     <div class="page-header">
       <h1>${esc(name)}</h1>
@@ -335,8 +369,9 @@ async function renderCharacter(name) {
         <div class="prose">${md(sheet)}</div>
       </div>
       <div class="card">
-        <h2>Story Thread</h2>
-        <div class="prose">${md(story)}</div>
+        <h2>Current Handoff</h2>
+        <div class="prose">${handoff ? md(handoff) : '<p class="empty-note">No handoff note found.</p>'}</div>
+        ${historyHtml}
       </div>
     </div>`;
 }
@@ -447,6 +482,20 @@ async function render() {
   }
 }
 
+// ── Mobile nav toggle ────────────────────────────────────────────────
+function closeDrawer() { document.body.classList.remove('nav-open'); }
+
+document.getElementById('nav-toggle').addEventListener('click', () => {
+  document.body.classList.toggle('nav-open');
+});
+
+document.getElementById('nav-overlay').addEventListener('click', closeDrawer);
+
+// Close drawer when a drawer link is tapped
+document.querySelectorAll('[data-drawer-link]').forEach(a => {
+  a.addEventListener('click', closeDrawer);
+});
+
 // ── Global click delegation (handles data-nav and quick-links) ───────
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-nav]');
@@ -457,6 +506,18 @@ document.getElementById('refresh-btn').addEventListener('click', () => {
   clearCache();
   render();
 });
+
+// ── Update drawer active state alongside top nav ──────────────────────
+const _origUpdateTopNav = updateTopNav;
+updateTopNav = function() {
+  _origUpdateTopNav();
+  const route = getRoute();
+  document.querySelectorAll('#nav-drawer a').forEach(a => {
+    const r = a.dataset.route;
+    const isActive = r === '/' ? (route === '/' || route === '') : route.startsWith(r);
+    a.classList.toggle('active', isActive);
+  });
+};
 
 // ── Boot ─────────────────────────────────────────────────────────────
 window.addEventListener('hashchange', render);

@@ -16,7 +16,10 @@
       <span class="nav-logo-icon">⬡</span>
       <span class="nav-logo-text">City of Shadow</span>
     </a>
+
     <div class="nav-divider"></div>
+
+    <!-- Desktop links -->
     <ul class="nav-links">
       <li><a href="#/" data-route="/">Summary</a></li>
       <li><a href="#/characters" data-route="/characters">Characters</a></li>
@@ -24,8 +27,26 @@
       <li><a href="#/city" data-route="/city">City</a></li>
       <li><a href="#/events" data-route="/events">Events</a></li>
     </ul>
+
     <span class="nav-refresh" id="refresh-btn">↻ Refresh</span>
+
+    <!-- Hamburger (mobile only) -->
+    <button id="nav-toggle" aria-label="Toggle menu">
+      <span></span><span></span><span></span>
+    </button>
   </nav>
+
+  <!-- Mobile drawer -->
+  <div id="nav-drawer">
+    <a href="#/" data-route="/" data-drawer-link>Summary</a>
+    <a href="#/characters" data-route="/characters" data-drawer-link>Characters</a>
+    <a href="#/npcs" data-route="/npcs" data-drawer-link>NPCs</a>
+    <a href="#/city" data-route="/city" data-drawer-link>City</a>
+    <a href="#/events" data-route="/events" data-drawer-link>Events</a>
+  </div>
+
+  <!-- Tap outside to close -->
+  <div id="nav-overlay"></div>
 
   <div id="app">
     <aside id="side-nav"></aside>
