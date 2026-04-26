@@ -415,7 +415,7 @@ async function renderSummary() {
   const recentCharSection = recentChars.length ? `
     <div style="margin-bottom:1.75rem">
       <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:.75rem">
-        <h2 style="font-family:'IM Fell English',serif;font-size:1.1rem;color:var(--gold-light);letter-spacing:.04em">Recent Characters</h2>
+        <h2 style="font-family:'JetBrains Mono',monospace;font-size:.8rem;font-weight:400;color:var(--gold-light);letter-spacing:.16em;text-transform:uppercase">Recent Characters</h2>
         <span class="card-footer-link" data-nav="/characters">All Characters &rarr;</span>
       </div>
       <div class="char-grid">${charCards}</div>
