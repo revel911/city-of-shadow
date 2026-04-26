@@ -34,8 +34,8 @@ async function driveList(folderId) {
   return json.files || [];
 }
 
-async function driveExport(fileId) {
-  const p = new URLSearchParams({ mimeType: 'text/plain', key: CONFIG.API_KEY });
+async function driveExport(fileId, mimeType = 'text/plain') {
+  const p = new URLSearchParams({ mimeType, key: CONFIG.API_KEY });
   const res = await fetch(`${DRIVE}/files/${fileId}/export?${p}`);
   if (!res.ok) throw new Error(`Export failed (${res.status})`);
   return res.text();
@@ -136,7 +136,11 @@ async function getEventsLog() {
   return cached('events', async () => {
     // Pinned doc — always use it when configured
     if (CONFIG.EVENTS_DOC_ID) {
-      return driveExport(CONFIG.EVENTS_DOC_ID).catch(() => '');
+      // Prefer markdown export — preserves heading styles as ## markers so
+      // structure detection and section reversal work correctly.
+      return driveExport(CONFIG.EVENTS_DOC_ID, 'text/markdown')
+        .catch(() => driveExport(CONFIG.EVENTS_DOC_ID))
+        .catch(() => '');
     }
 
     const files = await getRootFiles();
@@ -704,10 +708,36 @@ async function renderEvents() {
       // Reverse entry sections; keep preamble (doc title/intro) pinned to top
       const reversed = [...sections].reverse();
       const parts = preamble ? [preamble, ...reversed] : reversed;
-      body = `<div class="prose">${md(parts.join('\n\n---\n\n'))}</div>`;
+      body = `<div class="prose events-prose">${md(parts.join('\n\n---\n\n'))}</div>`;
     } else {
-      // No detectable entry boundaries — render as-is rather than scramble
-      body = `<div class="prose">${md(log)}</div>`;
+      // No heading/separator structure found (likely plain-text Google Docs export).
+      // Normalize single newlines → double so marked.js creates proper <p> tags,
+      // then group paragraphs into visual entries separated by <hr>.
+      const normalized = log
+        .replace(/\r\n/g, '\n')
+        .replace(/([^\n])\n(?!\n)/g, '$1\n\n')
+        .trim();
+      const grafs = normalized.split(/\n{2,}/).map(g => g.trim()).filter(Boolean);
+
+      if (grafs.length < 3) {
+        body = `<div class="prose events-prose">${md(normalized)}</div>`;
+      } else {
+        // Heuristic: a short paragraph (≤ 80 chars) that isn't the very first one
+        // is likely an entry title — use it as a section break.
+        const chunks = [];
+        let chunk = [];
+        grafs.forEach((g, i) => {
+          const looksLikeTitle = i > 0 && g.length <= 80 && !g.endsWith('.');
+          if (looksLikeTitle && chunk.length) { chunks.push(chunk); chunk = []; }
+          chunk.push(g);
+        });
+        if (chunk.length) chunks.push(chunk);
+
+        const rendered = (chunks.length > 1 ? chunks : [grafs])
+          .map(c => `<div class="events-entry">${md(c.join('\n\n'))}</div>`)
+          .join('');
+        body = `<div class="prose events-prose">${rendered}</div>`;
+      }
     }
   }
 

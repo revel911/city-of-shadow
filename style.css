@@ -723,6 +723,31 @@ body.nav-open #nav-overlay { display: block; }
   font-size: 0.875rem;
 }
 
+/* ── Events prose ───────────────────────────────────────────────── */
+.events-prose { line-height: 1.8; }
+
+.events-prose .events-entry {
+  padding-bottom: 1.75rem;
+  margin-bottom: 1.75rem;
+  border-bottom: 1px solid var(--border-blood);
+}
+
+.events-prose .events-entry:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+/* First paragraph of each entry treated as the entry label */
+.events-prose .events-entry > p:first-child {
+  font-family: 'IM Fell English', serif;
+  font-size: 1rem;
+  color: var(--gold-light);
+  letter-spacing: 0.04em;
+  margin-bottom: 0.65rem;
+}
+
+/* ── Handoff source ──────────────────────────────────────────────── */
 .handoff-source {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.6rem;
