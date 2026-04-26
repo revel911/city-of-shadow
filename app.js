@@ -991,3 +991,27 @@ updateTopNav = function() {
 // ── Boot ─────────────────────────────────────────────────────────────
 window.addEventListener('hashchange', render);
 render();
+
+// ── Dice Roller ───────────────────────────────────────────────────────
+(function () {
+  const fab    = document.getElementById('dice-fab');
+  const panel  = document.getElementById('dice-panel');
+  const close  = document.getElementById('dice-close');
+  const rollBtn= document.getElementById('dice-roll-btn');
+  const die1   = document.getElementById('die1');
+  const die2   = document.getElementById('die2');
+  const total  = document.getElementById('die-total');
+
+  function d6() { return Math.floor(Math.random() * 6) + 1; }
+
+  function roll() {
+    const a = d6(), b = d6();
+    die1.textContent  = a;
+    die2.textContent  = b;
+    total.textContent = a + b;
+  }
+
+  fab.addEventListener('click', () => panel.classList.toggle('open'));
+  close.addEventListener('click', () => panel.classList.remove('open'));
+  rollBtn.addEventListener('click', roll);
+}());

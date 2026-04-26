@@ -53,6 +53,32 @@
     <main id="content"></main>
   </div>
 
+  <!-- Dice Roller -->
+  <button id="dice-fab" aria-label="Roll dice" title="Roll 2d6">⚄</button>
+  <div id="dice-panel">
+    <div class="dice-panel-header">
+      <span>Roll 2d6</span>
+      <button id="dice-close" aria-label="Close">✕</button>
+    </div>
+    <div class="dice-display">
+      <div class="die-cell">
+        <div class="die-value instinct-die" id="die1">–</div>
+        <div class="die-label">instinct</div>
+      </div>
+      <div class="dice-op">+</div>
+      <div class="die-cell">
+        <div class="die-value" id="die2">–</div>
+        <div class="die-label">&nbsp;</div>
+      </div>
+      <div class="dice-op">=</div>
+      <div class="die-cell">
+        <div class="die-value die-total" id="die-total">–</div>
+        <div class="die-label">total</div>
+      </div>
+    </div>
+    <button id="dice-roll-btn">Roll</button>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="app.js"></script>
 </body>
