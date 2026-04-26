@@ -9,11 +9,11 @@
   --blood-bright: #cc2020;
   --purple: #160c34;
   --mist: #5834a0;
-  --gold: #786030;
-  --gold-light: #9e7c3c;
-  --parchment: #c4c0bc;
-  --faded: #625e58;
-  --shadow: #363240;
+  --gold: #8c7238;
+  --gold-light: #b8924a;
+  --parchment: #d8d4cf;
+  --faded: #9a9490;
+  --shadow: #7a748a;
   --border: #16142a;
   --border-blood: #220808;
   --blood-glow: rgba(168, 22, 22, 0.22);
@@ -34,7 +34,7 @@ body {
   color: var(--parchment);
   font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
   font-size: 0.925rem;
-  font-weight: 300;
+  font-weight: 400;
   line-height: 1.7;
   min-height: 100vh;
   -webkit-text-size-adjust: 100%;
@@ -250,7 +250,7 @@ body.nav-open #nav-overlay { display: block; }
 
 .side-section-title {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.56rem;
+  font-size: 0.625rem;
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: var(--shadow);
@@ -458,7 +458,7 @@ body.nav-open #nav-overlay { display: block; }
   font-size: 0.68rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--blood);
+  color: var(--blood-light);
   cursor: pointer;
   transition: color 0.12s;
 }
@@ -523,7 +523,7 @@ body.nav-open #nav-overlay { display: block; }
 
 .stat-name {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.52rem;
+  font-size: 0.625rem;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--shadow);
@@ -556,7 +556,7 @@ body.nav-open #nav-overlay { display: block; }
   font-size: 0.65rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--blood);
+  color: var(--blood-light);
   transition: color 0.12s;
 }
 .char-card:hover .char-link { color: var(--blood-bright); }
@@ -801,10 +801,10 @@ body.nav-open #nav-overlay { display: block; }
 
 .handoff-row-label {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.53rem;
+  font-size: 0.625rem;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--shadow);
+  color: var(--faded);
   padding-top: 0.18rem;
   flex-shrink: 0;
 }
