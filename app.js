@@ -106,11 +106,12 @@ async function getPlayerData(folderId, playerName = '') {
 
     let handoff = '', handoffTitle = '', history = '';
     if (sessionLogText) {
-      // Use most recent session log file as the handoff source
-      handoff = sessionLogText;
       handoffTitle = sessionLogFile.name;
-      // Story thread becomes pure history
-      history = storyTexts.filter(Boolean).reverse().join('\n\n---\n\n');
+      // Extract just the handoff note section; everything else goes to history
+      const { handoff: h, history: logHistory } = splitStoryThread(sessionLogText);
+      handoff = h;
+      const storyHistory = storyTexts.filter(Boolean).reverse().join('\n\n---\n\n');
+      history = [logHistory, storyHistory].filter(Boolean).join('\n\n---\n\n');
     } else if (storyTexts.length) {
       // Fallback: parse handoff from the most recent story thread
       const { handoff: h, history: recentHistory } = splitStoryThread(storyTexts[storyTexts.length - 1]);
@@ -569,6 +570,25 @@ async function renderCharacter(name) {
       <div class="prose history-body">${md(history)}</div>
     </details>` : '';
 
+  // Render handoff with paragraph-count truncation
+  let handoffHtml = '<p class="empty-note">No handoff note found.</p>';
+  if (handoff) {
+    const grafs = handoff.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+    const FOLD = 5;
+    if (grafs.length <= FOLD) {
+      handoffHtml = `<div class="prose">${md(handoff)}</div>`;
+    } else {
+      const above = grafs.slice(0, FOLD).join('\n\n');
+      const below = grafs.slice(FOLD).join('\n\n');
+      handoffHtml = `
+        <div class="prose">${md(above)}</div>
+        <details class="history-toggle" style="margin-top:1rem">
+          <summary>Continue reading</summary>
+          <div class="prose history-body">${md(below)}</div>
+        </details>`;
+    }
+  }
+
   $content.innerHTML = `
     <div class="page-header">
       <h1>${esc(name)}</h1>
@@ -582,8 +602,8 @@ async function renderCharacter(name) {
       </div>
       <div class="card">
         <h2>Current Handoff</h2>
-        ${handoffTitle ? `<p class="char-playbook" style="margin-bottom:.75rem">${esc(handoffTitle)}</p>` : ''}
-        <div class="prose">${handoff ? md(handoff) : '<p class="empty-note">No handoff note found.</p>'}</div>
+        ${handoffTitle ? `<p class="handoff-source">${esc(handoffTitle)}</p>` : ''}
+        ${handoffHtml}
         ${historyHtml}
       </div>
     </div>`;

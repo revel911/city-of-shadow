@@ -723,6 +723,17 @@ body.nav-open #nav-overlay { display: block; }
   font-size: 0.875rem;
 }
 
+.handoff-source {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.6rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--shadow);
+  margin-bottom: 1rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
 /* ── Tablet (640px+) ────────────────────────────────────────────── */
 @media (min-width: 640px) {
   html { font-size: 16px; }
