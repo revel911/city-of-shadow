@@ -632,6 +632,27 @@ async function renderCity() {
     </div>`;
 }
 
+// Split markdown text into logical sections for reordering
+function splitMarkdownSections(text) {
+  // Prefer explicit --- separators
+  const bySep = text.split(/\n\s*-{3,}\s*\n/).map(s => s.trim()).filter(Boolean);
+  if (bySep.length > 1) return bySep;
+  // Fall back: split before each H2/H3 heading (after some content has accumulated)
+  const lines = text.split('\n');
+  const sections = [];
+  let cur = [];
+  for (const line of lines) {
+    if (/^#{2,3}\s/.test(line) && cur.some(l => l.trim())) {
+      sections.push(cur.join('\n').trim());
+      cur = [line];
+    } else {
+      cur.push(line);
+    }
+  }
+  if (cur.some(l => l.trim())) sections.push(cur.join('\n').trim());
+  return sections.filter(Boolean);
+}
+
 // ── Page: Events ─────────────────────────────────────────────────────
 async function renderEvents() {
   setSideNav([{ title: 'Events', items: [{ href: '#/events', label: 'Full Log' }] }]);
@@ -647,7 +668,9 @@ async function renderEvents() {
   if (!log.trim()) {
     body = '<p class="empty-note">Events log is empty.</p>';
   } else if (hasHeaders) {
-    body = `<div class="prose">${md(log)}</div>`;
+    const sections = splitMarkdownSections(log);
+    const ordered = sections.length > 1 ? [...sections].reverse() : sections;
+    body = `<div class="prose">${md(ordered.join('\n\n---\n\n'))}</div>`;
   } else {
     const lines = log.split('\n').map(l=>l.trim()).filter(l=>l.length>0&&!l.startsWith('#')&&!l.startsWith('---'));
     body = `<div class="timeline">${[...lines].reverse().map((e,i)=>`
