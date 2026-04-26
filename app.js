@@ -541,56 +541,100 @@ function splitStoryThread(text) {
 // ── Structured handoff (YAML session log format) ────────────────────
 
 function isYamlHandoff(text) {
-  return /\b(where_we_are|who_is_present|current_handoff|last_beat)\s*:/m.test(text);
+  // Matches both the new top-level `handoff:` block and the old `current_handoff:` key
+  return /^handoff\s*:/m.test(text) || /\b(where_we_are|who_is_present|last_beat)\s*:/m.test(text);
 }
 
-function extractHandoffField(text, field) {
-  // Handles: field: "quoted", field: 'quoted', field: unquoted (stops at next key: or newline)
-  const re = new RegExp(
-    `\\b${field}:\\s*(?:"((?:[^"\\\\]|\\\\.)*)"|'((?:[^'\\\\]|\\\\.)*)'|(.*?(?=\\s+\\w[\\w_]*:|\\n|$)))`,
+// Extract the text block nested under a given top-level YAML key.
+// Stops when it hits another top-level key (no leading whitespace before `key:`).
+function extractYamlBlock(text, topKey) {
+  const re = new RegExp(`^${topKey}\\s*:\\s*\\n([\\s\\S]*?)(?=^\\S|\\Z)`, 'm');
+  const m = text.match(re);
+  return m ? m[1] : '';
+}
+
+// Extract a scalar field from a YAML block (handles quoted, unquoted, block scalars |).
+// blockText is the indented content under the parent key.
+function extractYamlField(blockText, field) {
+  // Block scalar (|): field followed by | then indented lines until next key
+  const blockScalarRe = new RegExp(
+    `^[ \\t]*${field}:\\s*\\|[ \\t]*\\n((?:[ \\t]+[^\\n]*\\n?)*)`,
     'm'
   );
-  const m = text.match(re);
-  if (!m) return '';
-  return (m[1] ?? m[2] ?? m[3] ?? '').trim();
+  const bsm = blockText.match(blockScalarRe);
+  if (bsm) {
+    // Strip common leading indentation
+    const lines = bsm[1].split('\n');
+    const indent = lines[0].match(/^([ \t]*)/)[1].length;
+    return lines.map(l => l.slice(indent)).join('\n').trim();
+  }
+
+  // Quoted scalar: field: "value" or field: 'value'
+  const quotedRe = new RegExp(
+    `^[ \\t]*${field}:\\s*(?:"((?:[^"\\\\]|\\\\.)*)"|'((?:[^'\\\\]|\\\\.)*)')`,
+    'm'
+  );
+  const qm = blockText.match(quotedRe);
+  if (qm) return (qm[1] ?? qm[2] ?? '').trim();
+
+  // Unquoted scalar: field: value (stop at next same-or-lower-indent key or newline)
+  const unquotedRe = new RegExp(`^[ \\t]*${field}:\\s+([^\\n|>][^\\n]*)`, 'm');
+  const um = blockText.match(unquotedRe);
+  if (um) return um[1].trim();
+
+  return '';
 }
 
-function extractHandoffList(text, field) {
-  // Inline array: field: ["item1", "item2"]
-  const inlineRe = new RegExp(`\\b${field}:\\s*\\[([^\\]]+)\\]`, 'm');
-  const inlineM = text.match(inlineRe);
-  if (inlineM) {
-    return inlineM[1].split(',')
+// Extract a YAML list field (block `- item` format or inline `[a, b]`).
+function extractYamlList(blockText, field) {
+  // Inline: field: ["a", "b"]
+  const inlineRe = new RegExp(`^[ \\t]*${field}:\\s*\\[([^\\]]+)\\]`, 'm');
+  const im = blockText.match(inlineRe);
+  if (im) {
+    return im[1].split(',')
       .map(s => s.trim().replace(/^["']|["']$/g, '').trim())
       .filter(Boolean);
   }
-  // Block list: `- item` lines following `field:`
-  const blockRe = new RegExp(`\\b${field}:[^\\n]*\\n((?:[ \\t]*[-*][^\\n]+\\n?)*)`, 'm');
-  const blockM = text.match(blockRe);
-  if (blockM) {
-    return blockM[1].split('\n')
-      .map(l => l.replace(/^[ \t]*[-*]\s*["']?|["']?\s*$/, '').trim())
+
+  // Block: field:\n  - item
+  const blockRe = new RegExp(`^[ \\t]*${field}:[^\\n]*\\n((?:[ \\t]+-[^\\n]+\\n?)*)`, 'm');
+  const bm = blockText.match(blockRe);
+  if (bm) {
+    return bm[1].split('\n')
+      .map(l => l.replace(/^[ \t]*-\s*["']?|["']?\s*$/, '').trim())
       .filter(Boolean);
   }
   return [];
 }
 
 function parseYamlHandoff(text) {
-  const archiveLabels = [...text.matchAll(/\blabel:\s*["']?([^"'\n]+)/g)]
+  // Prefer the top-level `handoff:` block (schema v2).
+  // Fall back to searching the full text (older format or flat YAML).
+  const block = extractYamlBlock(text, 'handoff') || text;
+
+  // Archive: collect all `label:` values from handoff_archive block
+  const archiveBlock = extractYamlBlock(text, 'handoff_archive') || '';
+  const archiveLabels = [...archiveBlock.matchAll(/[ \t]*label:\s*["']?([^"'\n]+)/g)]
     .map(m => m[1].trim()).filter(Boolean);
+
+  // Also grab the current handoff label for the title
+  const currentLabel = extractYamlField(block, 'label');
+
   return {
-    current_handoff:   extractHandoffField(text, 'current_handoff'),
-    where_we_are:      extractHandoffField(text, 'where_we_are'),
-    who_is_present:    extractHandoffField(text, 'who_is_present'),
-    last_beat:         extractHandoffField(text, 'last_beat'),
-    discoveries:       extractHandoffField(text, 'discoveries'),
-    player_intent:     extractHandoffField(text, 'player_intent'),
-    must_not_forget:   extractHandoffField(text, 'must_not_forget'),
-    mood:              extractHandoffField(text, 'mood'),
-    lore_note:         extractHandoffField(text, 'lore_note'),
-    tension_threads:   extractHandoffList(text, 'tension_threads'),
-    open_interactions: extractHandoffList(text, 'open_interactions'),
-    hubs_touched:      extractHandoffList(text, 'hubs_touched'),
+    label:             currentLabel,
+    where_we_are:      extractYamlField(block, 'where_we_are'),
+    who_is_present:    extractYamlField(block, 'who_is_present'),
+    last_beat:         extractYamlField(block, 'last_beat'),
+    player_intent:     extractYamlField(block, 'player_intent'),
+    must_not_forget:   extractYamlList(block, 'must_not_forget'),
+    mood:              extractYamlField(block, 'mood'),
+    lore_flags:        extractYamlList(block, 'lore_flags'),
+    harm:              extractYamlField(block, 'harm'),
+    hold_remaining:    extractYamlField(block, 'hold_remaining'),
+    tension_threads:   extractYamlList(block, 'tension_threads'),
+    open_interactions: extractYamlList(block, 'open_interactions'),
+    active_bonuses:    extractYamlList(block, 'active_bonuses'),
+    hubs_touched:      extractYamlList(block, 'hubs_touched'),
     archive_labels:    archiveLabels,
   };
 }
@@ -604,32 +648,50 @@ function renderYamlHandoff(data) {
         <ul class="handoff-list">${value.map(v => `<li>${esc(String(v))}</li>`).join('')}</ul>
       </div>`;
     }
+    // Multiline prose (last_beat) — preserve line breaks, don't escape newlines away
+    const hasNewlines = String(value).includes('\n');
+    const bodyContent = hasNewlines
+      ? `<div class="handoff-row-body handoff-prose">${esc(String(value)).replace(/\n/g, '<br>')}</div>`
+      : `<div class="handoff-row-body">${esc(String(value))}</div>`;
     return `<div class="handoff-row">
       <div class="handoff-row-label">${esc(label)}</div>
-      <div class="handoff-row-body">${esc(String(value))}</div>
+      ${bodyContent}
     </div>`;
   };
 
-  const archiveHtml = data.archive_labels.length > 1
+  // Mechanical state row — only show if there's anything
+  const mechParts = [
+    data.harm         ? `Harm&nbsp;<strong>${esc(data.harm)}</strong>` : '',
+    data.hold_remaining !== '' && data.hold_remaining !== '0' && data.hold_remaining
+      ? `Hold&nbsp;<strong>${esc(data.hold_remaining)}</strong>` : '',
+  ].filter(Boolean);
+  const mechHtml = mechParts.length
+    ? `<div class="handoff-row">
+        <div class="handoff-row-label">State</div>
+        <div class="handoff-row-body">${mechParts.join(' &nbsp;·&nbsp; ')}</div>
+      </div>` : '';
+
+  const archiveHtml = data.archive_labels.length
     ? `<details class="history-toggle" style="margin-top:1.25rem">
-        <summary>Handoff Archive (${data.archive_labels.length - 1} previous)</summary>
+        <summary>Handoff Archive (${data.archive_labels.length} previous)</summary>
         <ul class="handoff-list history-body" style="margin-top:0.75rem">
-          ${data.archive_labels.slice(1).map(l => `<li>${esc(l)}</li>`).join('')}
+          ${data.archive_labels.map(l => `<li>${esc(l)}</li>`).join('')}
         </ul>
       </details>`
     : '';
 
   return `<div class="structured-handoff">
-    ${data.current_handoff ? `<div class="handoff-title">${esc(data.current_handoff)}</div>` : ''}
+    ${data.label ? `<div class="handoff-title">${esc(data.label)}</div>` : ''}
     ${fieldRow('Where We Are', data.where_we_are)}
     ${fieldRow('Present', data.who_is_present)}
     ${fieldRow('Last Beat', data.last_beat)}
-    ${fieldRow('Discoveries', data.discoveries)}
-    ${fieldRow('Player Intent', data.player_intent)}
     ${fieldRow('Tension Threads', data.tension_threads)}
     ${fieldRow('Must Not Forget', data.must_not_forget)}
+    ${mechHtml}
+    ${fieldRow('Active Bonuses', data.active_bonuses)}
+    ${fieldRow('Player Intent', data.player_intent)}
     ${fieldRow('Mood', data.mood)}
-    ${fieldRow('Lore Note', data.lore_note)}
+    ${fieldRow('Lore Flags', data.lore_flags)}
     ${fieldRow('Open Interactions', data.open_interactions)}
     ${archiveHtml}
   </div>`;
