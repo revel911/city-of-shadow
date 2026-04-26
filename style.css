@@ -393,7 +393,7 @@ body.nav-open #nav-overlay { display: block; }
 }
 
 .card h2 {
-  font-family: 'New Gothic Style', sans-serif;
+  font-family: 'JetBrains Mono', monospace;
   font-size: 1rem;
   font-weight: 400;
   color: var(--gold-light);
@@ -608,7 +608,7 @@ body.nav-open #nav-overlay { display: block; }
 }
 
 .prose h2 {
-  font-family: 'New Gothic Style', sans-serif;
+  font-family: 'JetBrains Mono', monospace;
   font-size: 1.2rem;
   font-weight: 400;
   color: var(--gold-light);
