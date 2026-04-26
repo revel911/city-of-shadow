@@ -632,25 +632,38 @@ async function renderCity() {
     </div>`;
 }
 
-// Split markdown text into logical sections for reordering
+// Split a document into { preamble, sections } for chronological reordering.
+// Preamble = content before the first heading (title block, kept at top).
+// Sections = each heading + its body, in document order (caller reverses).
 function splitMarkdownSections(text) {
-  // Prefer explicit --- separators
+  // 1. Explicit --- separators
   const bySep = text.split(/\n\s*-{3,}\s*\n/).map(s => s.trim()).filter(Boolean);
-  if (bySep.length > 1) return bySep;
-  // Fall back: split before each H2/H3 heading (after some content has accumulated)
+  if (bySep.length > 1) return { preamble: '', sections: bySep };
+
+  // 2. Any H1–H3 heading as section boundary
   const lines = text.split('\n');
+  const preambleLines = [];
   const sections = [];
-  let cur = [];
+  let cur = null;
+
   for (const line of lines) {
-    if (/^#{2,3}\s/.test(line) && cur.some(l => l.trim())) {
-      sections.push(cur.join('\n').trim());
+    if (/^#{1,3}\s/.test(line)) {
+      if (cur !== null && cur.some(l => l.trim())) sections.push(cur.join('\n').trim());
       cur = [line];
-    } else {
+    } else if (cur !== null) {
       cur.push(line);
+    } else {
+      preambleLines.push(line);
     }
   }
-  if (cur.some(l => l.trim())) sections.push(cur.join('\n').trim());
-  return sections.filter(Boolean);
+  if (cur !== null && cur.some(l => l.trim())) sections.push(cur.join('\n').trim());
+
+  if (sections.length >= 2) {
+    return { preamble: preambleLines.join('\n').trim(), sections };
+  }
+
+  // 3. No detectable structure
+  return { preamble: '', sections: [text] };
 }
 
 // ── Page: Events ─────────────────────────────────────────────────────
@@ -662,22 +675,20 @@ async function renderEvents() {
   try { log = await getEventsLog(); }
   catch (e) { showError('Could not load events', e.message, true); return; }
 
-  const hasHeaders = log.split('\n').filter(l => /^#+\s/.test(l)).length >= 3;
-
   let body = '';
   if (!log.trim()) {
     body = '<p class="empty-note">Events log is empty.</p>';
-  } else if (hasHeaders) {
-    const sections = splitMarkdownSections(log);
-    const ordered = sections.length > 1 ? [...sections].reverse() : sections;
-    body = `<div class="prose">${md(ordered.join('\n\n---\n\n'))}</div>`;
   } else {
-    const lines = log.split('\n').map(l=>l.trim()).filter(l=>l.length>0&&!l.startsWith('#')&&!l.startsWith('---'));
-    body = `<div class="timeline">${[...lines].reverse().map((e,i)=>`
-      <div class="timeline-item">
-        <div class="timeline-num">${String(lines.length-i).padStart(3,'0')}</div>
-        <div class="timeline-text">${esc(e)}</div>
-      </div>`).join('')}</div>`;
+    const { preamble, sections } = splitMarkdownSections(log);
+    if (sections.length > 1) {
+      // Reverse entry sections; keep preamble (doc title/intro) pinned to top
+      const reversed = [...sections].reverse();
+      const parts = preamble ? [preamble, ...reversed] : reversed;
+      body = `<div class="prose">${md(parts.join('\n\n---\n\n'))}</div>`;
+    } else {
+      // No detectable entry boundaries — render as-is rather than scramble
+      body = `<div class="prose">${md(log)}</div>`;
+    }
   }
 
   $content.innerHTML = `
