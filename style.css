@@ -91,7 +91,7 @@ a { color: inherit; text-decoration: none; }
 }
 
 .nav-logo-text {
-  font-family: 'DM Sans', system-ui, sans-serif;
+  font-family: 'New Gothic Style', sans-serif;
   font-weight: 500;
   font-size: 0.9rem;
   letter-spacing: 0.12em;
@@ -481,7 +481,7 @@ body.nav-open #nav-overlay { display: block; }
 }
 
 .char-name {
-  font-family: 'New Gothic Style', sans-serif;
+  font-family: 'JetBrains Mono', monospace;
   font-size: 1.3rem;
   font-weight: 400;
   color: var(--parchment);
