@@ -2,6 +2,7 @@
 const CONFIG = {
   ROOT_FOLDER_ID: '1La--TBYjyQswMksN7EYwcbVxUlutsxTR',
   API_KEY: 'AIzaSyCvu6iSrATB8vqVxBdNrglS3IvdGlhRCFk',
+  EVENTS_DOC_ID: '1xd-JLhFHlrT0aDxgDC2f2Z6pUPLsC0gt6LborBMv-dc',
 };
 
 // ── Simple in-session cache (clears on page reload) ──────────────────
@@ -132,10 +133,14 @@ async function getWorldBible() {
 
 async function getEventsLog() {
   return cached('events', async () => {
-    const files = await getRootFiles();
+    // Pinned doc — always use it when configured
+    if (CONFIG.EVENTS_DOC_ID) {
+      return driveExport(CONFIG.EVENTS_DOC_ID).catch(() => '');
+    }
 
-    // If there's an Events/ subfolder, aggregate all docs inside it (one per session)
-    // This is the recommended path: MC creates a new doc per session rather than editing the log
+    const files = await getRootFiles();
+    const parts = [];
+
     const eventsFolder = files.find(f =>
       f.mimeType === 'application/vnd.google-apps.folder' && /^events$/i.test(f.name)
     );
@@ -150,11 +155,9 @@ async function getEventsLog() {
       }
     }
 
-    // Always also check the single Public Events Log doc — include it if it has real entries
     const logFile = findBestFile(files, /public\s*events/i) || findBestFile(files, /^02\s*[—-]/);
     if (logFile) {
       const logText = await driveExport(logFile.id).catch(() => '');
-      // Exclude if it's still the template (contains the literal placeholder, not a real date)
       if (logText && !/\[YYYY-MM-DD\]/.test(logText) && logText.trim().length > 150) {
         parts.push(logText);
       }
@@ -195,12 +198,37 @@ async function getHubDocs() {
 
 // ── Parse helpers ────────────────────────────────────────────────────
 function parseStats(text) {
-  return ['Blood','Heart','Mind','Spirit','Shadow'].flatMap(name => {
-    // Allow any non-newline, non-digit, non-sign chars between the label and value
-    // so formats like "Blood: +2", "Blood	2", "Blood** 0", "Blood (+1)" all match
+  const statNames = ['Blood','Heart','Mind','Spirit','Shadow'];
+  const found = new Map();
+
+  // Strategy 1: stat name and value on the same line
+  // Handles: "Blood: +2", "Blood  0", "Blood	-1", "Blood (+2)", etc.
+  for (const name of statNames) {
     const m = text.match(new RegExp(`${name}[^\\n\\d+-]*([+-]?\\d+)`, 'i'));
-    return m ? [{ name, value: parseInt(m[1], 10) }] : [];
-  });
+    if (m) found.set(name, parseInt(m[1], 10));
+  }
+
+  // Strategy 2: column-based table — names on one line, values on the next
+  // Handles Google Docs tables exported as tab-separated rows, e.g.:
+  //   Blood  Heart  Mind  Spirit  Shadow
+  //   +2     0      -1    +1      +2
+  if (found.size < 3) {
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length - 1; i++) {
+      const presentStats = statNames.filter(n => new RegExp(`\\b${n}\\b`, 'i').test(lines[i]));
+      if (presentStats.length < 2) continue; // need 2+ stat names on one line to treat it as a header row
+      for (let j = i + 1; j <= Math.min(i + 2, lines.length - 1); j++) {
+        const nums = (lines[j].match(/[+-]?\d+/g) || []).map(Number);
+        if (nums.length >= presentStats.length) {
+          presentStats.forEach((name, idx) => { if (!found.has(name)) found.set(name, nums[idx]); });
+          break;
+        }
+      }
+      if (found.size >= 3) break;
+    }
+  }
+
+  return statNames.flatMap(n => found.has(n) ? [{ name: n, value: found.get(n) }] : []);
 }
 
 function parsePlaybook(text) {
@@ -339,12 +367,22 @@ async function renderSummary() {
   setSideNav([]);
   showLoading('Reading the city\u2026');
 
-  let players = [], events = [], err = '';
+  let players = [], events = '', err = '';
   try {
     const [folders, log] = await Promise.all([getPlayerFolders(), getEventsLog()]);
-    players = folders.filter(f => f.name);
-    events  = recentLines(log);
+    players = folders.filter(f => f.name)
+      .sort((a, b) => (b.modifiedTime || '').localeCompare(a.modifiedTime || ''));
+    events = log;
   } catch (e) { err = e.message; }
+
+  // Load character data for the 3 most recently active players
+  const recentPlayers = players.slice(0, 3);
+  const recentChars = await Promise.all(
+    recentPlayers.map(async p => {
+      try { const d = await getPlayerData(p.id, p.name); return { ...p, ...d }; }
+      catch { return { ...p, sheet: '', sheetArchive: [], handoff: '', handoffTitle: '', history: '' }; }
+    })
+  );
 
   const errorHtml = err ? `
     <div class="error-card" style="margin-bottom:1.5rem">
@@ -353,14 +391,36 @@ async function renderSummary() {
       <p class="error-setup">Set <code>API_KEY</code> in <code>app.js</code> and share Drive files publicly.</p>
     </div>` : '';
 
-  const playerItems = players.length
-    ? players.map(p => `<div class="quick-link" data-nav="/characters/${encodeURIComponent(p.name)}">${esc(p.name)}</div>`).join('')
-    : '<p class="empty-note">No characters found.</p>';
+  const charCards = recentChars.map(c => {
+    const stats    = parseStats(c.sheet);
+    const playbook = parsePlaybook(c.sheet);
+    return `
+      <div class="char-card" data-nav="/characters/${encodeURIComponent(c.name)}">
+        <div class="char-card-inner">
+          <div>
+            <div class="char-name">${esc(c.name)}</div>
+            ${playbook ? `<div class="char-playbook">${esc(playbook)}</div>` : ''}
+          </div>
+          ${statPills(stats)}
+          <div class="char-link">View Sheet &rarr;</div>
+        </div>
+      </div>`;
+  }).join('');
 
-  const eventItems = events.length
-    ? `<div class="timeline">${events.map((e,i) => `
+  const recentCharSection = recentChars.length ? `
+    <div style="margin-bottom:1.75rem">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:.75rem">
+        <h2 style="font-family:'IM Fell English',serif;font-size:1.1rem;color:var(--gold-light);letter-spacing:.04em">Recent Characters</h2>
+        <span class="card-footer-link" data-nav="/characters">All Characters &rarr;</span>
+      </div>
+      <div class="char-grid">${charCards}</div>
+    </div>` : '';
+
+  const eventItems = recentLines(events);
+  const eventHtml = eventItems.length
+    ? `<div class="timeline">${eventItems.map((e, i) => `
         <div class="timeline-item">
-          <div class="timeline-num">${String(events.length-i).padStart(3,'0')}</div>
+          <div class="timeline-num">${String(eventItems.length - i).padStart(3, '0')}</div>
           <div class="timeline-text">${esc(e)}</div>
         </div>`).join('')}</div>`
     : '<p class="empty-note">Events log not loaded.</p>';
@@ -372,24 +432,19 @@ async function renderSummary() {
       <p>The city breathes. The city bleeds. The city remembers.</p>
       <div class="ornament"><span style="font-size:.7rem">✦</span></div>
     </div>
+    ${recentCharSection}
     <div class="dashboard-grid">
       <div class="sidebar-cards">
         <div class="card">
-          <h2>Active Shadows</h2>
-          ${playerItems}
-          <div class="card-footer">
-            <span class="card-footer-link" data-nav="/characters">All Characters &rarr;</span>
-          </div>
-        </div>
-        <div class="card">
           <h2>Navigate</h2>
+          <div class="quick-link purple" data-nav="/characters">Characters</div>
           <div class="quick-link purple" data-nav="/city">City</div>
           <div class="quick-link purple" data-nav="/events">Public Events Log</div>
         </div>
       </div>
       <div class="card">
         <h2>Recent Events</h2>
-        ${eventItems}
+        ${eventHtml}
         <div class="card-footer">
           <span class="card-footer-link" data-nav="/events">Full Events Log &rarr;</span>
         </div>
