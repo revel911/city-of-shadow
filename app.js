@@ -538,6 +538,103 @@ function splitStoryThread(text) {
   };
 }
 
+// ── Structured handoff (YAML session log format) ────────────────────
+
+function isYamlHandoff(text) {
+  return /\b(where_we_are|who_is_present|current_handoff|last_beat)\s*:/m.test(text);
+}
+
+function extractHandoffField(text, field) {
+  // Handles: field: "quoted", field: 'quoted', field: unquoted (stops at next key: or newline)
+  const re = new RegExp(
+    `\\b${field}:\\s*(?:"((?:[^"\\\\]|\\\\.)*)"|'((?:[^'\\\\]|\\\\.)*)'|(.*?(?=\\s+\\w[\\w_]*:|\\n|$)))`,
+    'm'
+  );
+  const m = text.match(re);
+  if (!m) return '';
+  return (m[1] ?? m[2] ?? m[3] ?? '').trim();
+}
+
+function extractHandoffList(text, field) {
+  // Inline array: field: ["item1", "item2"]
+  const inlineRe = new RegExp(`\\b${field}:\\s*\\[([^\\]]+)\\]`, 'm');
+  const inlineM = text.match(inlineRe);
+  if (inlineM) {
+    return inlineM[1].split(',')
+      .map(s => s.trim().replace(/^["']|["']$/g, '').trim())
+      .filter(Boolean);
+  }
+  // Block list: `- item` lines following `field:`
+  const blockRe = new RegExp(`\\b${field}:[^\\n]*\\n((?:[ \\t]*[-*][^\\n]+\\n?)*)`, 'm');
+  const blockM = text.match(blockRe);
+  if (blockM) {
+    return blockM[1].split('\n')
+      .map(l => l.replace(/^[ \t]*[-*]\s*["']?|["']?\s*$/, '').trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function parseYamlHandoff(text) {
+  const archiveLabels = [...text.matchAll(/\blabel:\s*["']?([^"'\n]+)/g)]
+    .map(m => m[1].trim()).filter(Boolean);
+  return {
+    current_handoff:   extractHandoffField(text, 'current_handoff'),
+    where_we_are:      extractHandoffField(text, 'where_we_are'),
+    who_is_present:    extractHandoffField(text, 'who_is_present'),
+    last_beat:         extractHandoffField(text, 'last_beat'),
+    discoveries:       extractHandoffField(text, 'discoveries'),
+    player_intent:     extractHandoffField(text, 'player_intent'),
+    must_not_forget:   extractHandoffField(text, 'must_not_forget'),
+    mood:              extractHandoffField(text, 'mood'),
+    lore_note:         extractHandoffField(text, 'lore_note'),
+    tension_threads:   extractHandoffList(text, 'tension_threads'),
+    open_interactions: extractHandoffList(text, 'open_interactions'),
+    hubs_touched:      extractHandoffList(text, 'hubs_touched'),
+    archive_labels:    archiveLabels,
+  };
+}
+
+function renderYamlHandoff(data) {
+  const fieldRow = (label, value) => {
+    if (!value || (Array.isArray(value) && !value.length)) return '';
+    if (Array.isArray(value)) {
+      return `<div class="handoff-row">
+        <div class="handoff-row-label">${esc(label)}</div>
+        <ul class="handoff-list">${value.map(v => `<li>${esc(String(v))}</li>`).join('')}</ul>
+      </div>`;
+    }
+    return `<div class="handoff-row">
+      <div class="handoff-row-label">${esc(label)}</div>
+      <div class="handoff-row-body">${esc(String(value))}</div>
+    </div>`;
+  };
+
+  const archiveHtml = data.archive_labels.length > 1
+    ? `<details class="history-toggle" style="margin-top:1.25rem">
+        <summary>Handoff Archive (${data.archive_labels.length - 1} previous)</summary>
+        <ul class="handoff-list history-body" style="margin-top:0.75rem">
+          ${data.archive_labels.slice(1).map(l => `<li>${esc(l)}</li>`).join('')}
+        </ul>
+      </details>`
+    : '';
+
+  return `<div class="structured-handoff">
+    ${data.current_handoff ? `<div class="handoff-title">${esc(data.current_handoff)}</div>` : ''}
+    ${fieldRow('Where We Are', data.where_we_are)}
+    ${fieldRow('Present', data.who_is_present)}
+    ${fieldRow('Last Beat', data.last_beat)}
+    ${fieldRow('Discoveries', data.discoveries)}
+    ${fieldRow('Player Intent', data.player_intent)}
+    ${fieldRow('Tension Threads', data.tension_threads)}
+    ${fieldRow('Must Not Forget', data.must_not_forget)}
+    ${fieldRow('Mood', data.mood)}
+    ${fieldRow('Lore Note', data.lore_note)}
+    ${fieldRow('Open Interactions', data.open_interactions)}
+    ${archiveHtml}
+  </div>`;
+}
+
 // ── Page: Single character ───────────────────────────────────────────
 async function renderCharacter(name) {
   showLoading(`Finding ${esc(name)}\u2026`);
@@ -574,22 +671,26 @@ async function renderCharacter(name) {
       <div class="prose history-body">${md(history)}</div>
     </details>` : '';
 
-  // Render handoff with paragraph-count truncation
+  // Render handoff — use structured renderer for YAML session logs
   let handoffHtml = '<p class="empty-note">No handoff note found.</p>';
   if (handoff) {
-    const grafs = handoff.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
-    const FOLD = 5;
-    if (grafs.length <= FOLD) {
-      handoffHtml = `<div class="prose">${md(handoff)}</div>`;
+    if (isYamlHandoff(handoff)) {
+      handoffHtml = renderYamlHandoff(parseYamlHandoff(handoff));
     } else {
-      const above = grafs.slice(0, FOLD).join('\n\n');
-      const below = grafs.slice(FOLD).join('\n\n');
-      handoffHtml = `
-        <div class="prose">${md(above)}</div>
-        <details class="history-toggle" style="margin-top:1rem">
-          <summary>Continue reading</summary>
-          <div class="prose history-body">${md(below)}</div>
-        </details>`;
+      const grafs = handoff.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+      const FOLD = 5;
+      if (grafs.length <= FOLD) {
+        handoffHtml = `<div class="prose">${md(handoff)}</div>`;
+      } else {
+        const above = grafs.slice(0, FOLD).join('\n\n');
+        const below = grafs.slice(FOLD).join('\n\n');
+        handoffHtml = `
+          <div class="prose">${md(above)}</div>
+          <details class="history-toggle" style="margin-top:1rem">
+            <summary>Continue reading</summary>
+            <div class="prose history-body">${md(below)}</div>
+          </details>`;
+      }
     }
   }
 

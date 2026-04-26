@@ -773,6 +773,74 @@ body.nav-open #nav-overlay { display: block; }
   border-bottom: 1px solid var(--border);
 }
 
+/* ── Structured handoff (YAML session log) ──────────────────────── */
+.structured-handoff {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.handoff-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--blood-light);
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-blood);
+  margin-bottom: 0.1rem;
+  line-height: 1.5;
+}
+
+.handoff-row {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr;
+  gap: 0.35rem 0.9rem;
+  align-items: start;
+}
+
+.handoff-row-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.53rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--shadow);
+  padding-top: 0.18rem;
+  flex-shrink: 0;
+}
+
+.handoff-row-body {
+  font-size: 0.875rem;
+  color: var(--parchment);
+  line-height: 1.65;
+}
+
+.handoff-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0;
+  margin: 0;
+}
+
+.handoff-list li {
+  font-size: 0.875rem;
+  color: var(--parchment);
+  padding-left: 0.85rem;
+  position: relative;
+  line-height: 1.55;
+}
+
+.handoff-list li::before {
+  content: '—';
+  position: absolute;
+  left: 0;
+  color: var(--blood);
+  font-size: 0.7rem;
+  top: 0.2rem;
+}
+
 /* ── Tablet (640px+) ────────────────────────────────────────────── */
 @media (min-width: 640px) {
   html { font-size: 16px; }
