@@ -380,8 +380,7 @@ async function renderSummary() {
     events = log;
   } catch (e) { err = e.message; }
 
-  // Load character data for the 3 most recently active players
-  const recentPlayers = players.slice(0, 3);
+  const recentPlayers = players;
   const recentChars = await Promise.all(
     recentPlayers.map(async p => {
       try { const d = await getPlayerData(p.id, p.name); return { ...p, ...d }; }
@@ -416,7 +415,7 @@ async function renderSummary() {
     <div style="margin-bottom:1.75rem">
       <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:.75rem">
         <h2 style="font-family:'JetBrains Mono',monospace;font-size:.8rem;font-weight:400;color:var(--gold-light);letter-spacing:.16em;text-transform:uppercase">Recent Characters</h2>
-        <span class="card-footer-link" data-nav="/characters">All Characters &rarr;</span>
+        <span class="card-footer-link" data-nav="/characters">All Characters (${players.length}) &rarr;</span>
       </div>
       <div class="char-grid">${charCards}</div>
     </div>` : '';
