@@ -437,16 +437,10 @@ function extractNPCsFromYamlHandoff(handoffText, sourceLabel) {
 async function getAllNPCRoster() {
   return cached('npc-roster', async () => {
     // Gather all source documents in parallel
-    const [worldBible, hubDocs, eventsLog, npcEngine, playerFolders] = await Promise.all([
+    const [worldBible, hubDocs, eventsLog, playerFolders] = await Promise.all([
       getWorldBible(),
       getHubDocs(),
       getEventsLog(),
-      // NPC Personality Engine — dedicated NPC design doc in root
-      cached('npc-engine', async () => {
-        const files = await getRootFiles();
-        const f = findBestFile(files, /npc\s*personality/i);
-        return f ? driveExport(f.id, 'text/markdown').catch(() => driveExport(f.id)).catch(() => '') : '';
-      }),
       getPlayerFolders(),
     ]);
 
@@ -475,11 +469,7 @@ async function getAllNPCRoster() {
     for (const hub of hubDocs)
       for (const npc of parseNPCsFromText(hub.content, hub.name)) addNPC(npc, hub.name);
 
-    // 3. NPC Personality Engine — explicit NPC design notes
-    if (npcEngine)
-      for (const npc of parseNPCsFromText(npcEngine, 'NPC Engine')) addNPC(npc, 'NPC Engine');
-
-    // 4. Events Log — public events often mention NPCs with status context
+    // 3. Events Log — public events often mention NPCs with status context
     if (eventsLog)
       for (const npc of parseNPCsFromText(eventsLog, 'Events Log')) addNPC(npc, 'Events Log');
 
@@ -534,8 +524,6 @@ function renderNPCRoster(npcs) {
         ${npc.faction ? `<span class="${factionClass(npc.faction)}">${esc(npc.faction)}</span>` : ''}
         <span class="npc-status npc-status-${npc.status}">${statusLabel[npc.status] || 'Active'}</span>
       </div>
-      ${npc.role ? `<div class="npc-role">${esc(npc.role)}</div>` : ''}
-      <div class="npc-source">${esc(npc.source)}</div>
     </div>`;
   };
 

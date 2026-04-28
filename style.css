@@ -1052,21 +1052,6 @@ body.nav-open #nav-overlay { display: block; }
 .npc-faction-mortalis{ color: var(--faded);         border-color: var(--border);       }
 .npc-faction-none    { display: none; }
 
-.npc-role {
-  font-size: 0.77rem;
-  color: var(--shadow);
-  line-height: 1.5;
-  flex: 1;
-}
-
-.npc-source {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.52rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: #251f3a;
-  margin-top: auto;
-}
 
 .npc-dead-toggle summary { margin-top: 0.5rem; }
 
