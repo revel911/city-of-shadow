@@ -698,6 +698,11 @@ body.nav-open #nav-overlay { display: block; }
 
 .prose tr:last-child td { border-bottom: none; }
 
+.prose td:first-child {
+  font-weight: 500;
+  color: var(--gold-light);
+}
+
 /* ── Session history toggle ─────────────────────────────────────── */
 .history-toggle {
   margin-top: 1.5rem;

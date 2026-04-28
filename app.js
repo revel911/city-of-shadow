@@ -930,20 +930,27 @@ function parseYamlHandoff(text) {
   };
 }
 
+function yamlInline(str) {
+  return esc(String(str || ''))
+    .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*\n]+)\*/g, '<em>$1</em>')
+    .replace(/(^|&lt;br&gt;)#+\s*/g, '$1');
+}
+
 function renderYamlHandoff(data) {
   const fieldRow = (label, value) => {
     if (!value || (Array.isArray(value) && !value.length)) return '';
     if (Array.isArray(value)) {
       return `<div class="handoff-row">
         <div class="handoff-row-label">${esc(label)}</div>
-        <ul class="handoff-list">${value.map(v => `<li>${esc(String(v))}</li>`).join('')}</ul>
+        <ul class="handoff-list">${value.map(v => `<li>${yamlInline(v)}</li>`).join('')}</ul>
       </div>`;
     }
     // Multiline prose (last_beat) — preserve line breaks, don't escape newlines away
     const hasNewlines = String(value).includes('\n');
     const bodyContent = hasNewlines
-      ? `<div class="handoff-row-body handoff-prose">${esc(String(value)).replace(/\n/g, '<br>')}</div>`
-      : `<div class="handoff-row-body">${esc(String(value))}</div>`;
+      ? `<div class="handoff-row-body handoff-prose">${yamlInline(String(value)).replace(/\n/g, '<br>')}</div>`
+      : `<div class="handoff-row-body">${yamlInline(value)}</div>`;
     return `<div class="handoff-row">
       <div class="handoff-row-label">${esc(label)}</div>
       ${bodyContent}
@@ -972,7 +979,7 @@ function renderYamlHandoff(data) {
     : '';
 
   return `<div class="structured-handoff">
-    ${data.label ? `<div class="handoff-title">${esc(data.label)}</div>` : ''}
+    ${data.label ? `<div class="handoff-title">${yamlInline(data.label)}</div>` : ''}
     ${fieldRow('Where We Are', data.where_we_are)}
     ${fieldRow('Present', data.who_is_present)}
     ${fieldRow('Last Beat', data.last_beat)}
