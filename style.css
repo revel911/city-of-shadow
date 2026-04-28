@@ -989,6 +989,87 @@ body.nav-open #nav-overlay { display: block; }
   .two-col { grid-template-columns: 1fr 1fr; gap: 1.25rem; }
 }
 
+/* ── NPC Roster ─────────────────────────────────────────────────── */
+.npc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 0.65rem;
+}
+
+.npc-card {
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  padding: 0.85rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  transition: border-color 0.2s;
+}
+
+.npc-card:hover { border-color: var(--border-blood); }
+
+.npc-card-gone { opacity: 0.5; }
+
+.npc-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--parchment);
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+}
+
+.npc-card-gone .npc-name {
+  text-decoration: line-through;
+  color: var(--shadow);
+}
+
+.npc-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.npc-status,
+.npc-faction {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.52rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.38rem;
+  border: 1px solid;
+  white-space: nowrap;
+}
+
+.npc-status-active   { color: var(--gold-light);   border-color: var(--gold);         }
+.npc-status-deceased { color: var(--blood-light);   border-color: var(--blood);        }
+.npc-status-gone     { color: var(--shadow);        border-color: var(--border);       }
+
+.npc-faction-night   { color: var(--mist);          border-color: #2d1a55;             }
+.npc-faction-power   { color: var(--gold-light);    border-color: var(--gold);         }
+.npc-faction-wild    { color: #6a9a5a;              border-color: #2a4a1a;             }
+.npc-faction-mortalis{ color: var(--faded);         border-color: var(--border);       }
+.npc-faction-none    { display: none; }
+
+.npc-role {
+  font-size: 0.77rem;
+  color: var(--shadow);
+  line-height: 1.5;
+  flex: 1;
+}
+
+.npc-source {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.52rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #251f3a;
+  margin-top: auto;
+}
+
+.npc-dead-toggle summary { margin-top: 0.5rem; }
+
 /* ── Desktop (1024px+) ──────────────────────────────────────────── */
 @media (min-width: 1024px) {
   #nav-toggle { display: none; }

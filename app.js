@@ -94,10 +94,16 @@ async function getPlayerData(folderId, playerName = '') {
       );
     }
 
-    const [sheetTexts, storyTexts, sessionLogText] = await Promise.all([
+    // Interaction Queue — per-player NPC interaction planning doc
+    const interactionQueueFile = findBestFile(docFiles, /interaction\s*queue/i);
+
+    const [sheetTexts, storyTexts, sessionLogText, interactionQueueText] = await Promise.all([
       Promise.all(sheetFiles.map(f => driveExport(f.id).catch(() => ''))),
       Promise.all(storyFiles.map(f => driveExport(f.id).catch(() => ''))),
       sessionLogFile?.id ? driveExport(sessionLogFile.id).catch(() => '') : Promise.resolve(''),
+      interactionQueueFile?.id
+        ? driveExport(interactionQueueFile.id, 'text/markdown').catch(() => driveExport(interactionQueueFile.id)).catch(() => '')
+        : Promise.resolve(''),
     ]);
 
     // Most recent sheet = truth; older sheets = archive
@@ -120,7 +126,7 @@ async function getPlayerData(folderId, playerName = '') {
       history = [recentHistory, ...olderParts].filter(Boolean).join('\n\n---\n\n');
     }
 
-    return { sheet, sheetArchive, handoff, handoffTitle, history };
+    return { sheet, sheetArchive, handoff, handoffTitle, history, interactionQueue: interactionQueueText };
   });
 }
 
@@ -196,7 +202,8 @@ async function getHubDocs() {
     return Promise.all(docs.map(async f => ({
       name: f.name.replace(/^Hub\s*[—–-]\s*/i, ''), // strip "Hub — " prefix for display
       rawName: f.name,
-      content: await driveExport(f.id).catch(() => ''),
+      // markdown export preserves tables and headings for NPC parsing + better display
+      content: await driveExport(f.id, 'text/markdown').catch(() => driveExport(f.id)).catch(() => ''),
     })));
   });
 }
@@ -248,6 +255,245 @@ function recentLines(text, n = 8) {
     .filter(l => l.length > 20 && !l.startsWith('#') && !l.startsWith('---'))
     .slice(-n)
     .reverse();
+}
+
+// ── NPC helpers ──────────────────────────────────────────────────────
+
+function normalizeNPCStatus(text) {
+  const t = (text || '').toLowerCase();
+  if (/\b(deceased|dead|killed|terminated|died|murdered|no longer)\b/.test(t)) return 'deceased';
+  if (/\b(gone|missing|fled|removed|departed|vanished|exiled)\b/.test(t)) return 'gone';
+  return 'active';
+}
+
+function normalizeFaction(text) {
+  const m = (text || '').match(/\b(Night|Power|Wild|Mortalis)\b/i);
+  return m ? m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase() : '';
+}
+
+// Canonical dedup key: strip all common titles iteratively, remove quoted nicknames.
+function npcKey(name) {
+  const TITLE = /^(?:det\.?|sgt\.?|dr\.?|father|fr\.?|mr\.?|ms\.?|mrs\.?|prof\.?|sir|lady|judge|councilor|the|rev\.?|lt\.?|col\.?|officer|chief)\s+/i;
+  let k = name.toLowerCase().trim();
+  // Strip titles from the front repeatedly to handle chained prefixes ("Det. Sgt. …")
+  let prev;
+  do { prev = k; k = k.replace(TITLE, ''); } while (k !== prev);
+  // Remove quoted nicknames e.g. 'Ghost' or "Iron"
+  return k.replace(/["'"'][^"'"']{1,30}["'"']/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// Extract NPCs from any document text (handles markdown tables + bold-list entries under NPC headings).
+function parseNPCsFromText(text, sourceLabel) {
+  if (!text) return [];
+  const npcs = [];
+  const lines = text.split('\n');
+
+  let inNPCSection = false;
+  let sectionDepth = 0;
+  let tableHeaders = null;
+  let afterSeparator = false;
+
+  for (const line of lines) {
+    const raw = line.trim();
+
+    // ── Heading ──
+    const hm = raw.match(/^(#{1,6})\s+(.*)/);
+    if (hm) {
+      const depth = hm[1].length;
+      const title = hm[2];
+      if (inNPCSection && depth <= sectionDepth) inNPCSection = false;
+      // Broad set of headings that signal an NPC listing follows
+      if (/\bnpcs?|cast|characters?|(?:key\s+)?figures?|notable|roster|dramatis|who.?s\s*here|residents?|personalities|people\b/i.test(title)) {
+        inNPCSection = true;
+        sectionDepth = depth;
+      }
+      tableHeaders = null;
+      afterSeparator = false;
+      continue;
+    }
+
+    // ── Markdown table row ──
+    if (raw.startsWith('|')) {
+      const cells = raw.split('|').slice(1, -1).map(c => c.trim());
+      if (!cells.length) continue;
+
+      // Separator row
+      if (cells.every(c => /^[-:]+$/.test(c))) { afterSeparator = true; continue; }
+
+      if (!afterSeparator) {
+        // Header row — record column map
+        const hl = cells.map(c => c.toLowerCase().replace(/\*+/g, '').trim());
+        const hasStatus = hl.some(h => /^status$/.test(h));
+        const hasName   = hl.some(h => /^(npc|name|character|person)$/.test(h));
+        tableHeaders = (hasName || hasStatus || inNPCSection) ? hl : null;
+        continue;
+      }
+
+      // Data row — only parse if we have column context or are in an NPC section
+      if (!tableHeaders && !inNPCSection) continue;
+
+      const hl = tableHeaders || [];
+      const ni = Math.max(0, hl.findIndex(h => /^(npc|name|character|person)$/.test(h)));
+      const si = hl.findIndex(h => /^status$/.test(h));
+      const fi = hl.findIndex(h => /^(faction|affiliation)$/.test(h));
+      const ri = hl.findIndex(h => /^(role|description|notes|context|relationship|key\s*notes?)$/.test(h));
+
+      const name = (cells[ni] || '').replace(/\*+|\[|\]/g, '').trim();
+      if (!name || name.length < 2 || /^[-=]+$/.test(name)) continue;
+
+      const statusSrc  = si >= 0 ? cells[si] : cells.filter((_, j) => j !== ni).join(' ');
+      const factionSrc = fi >= 0 ? cells[fi] : cells.join(' ');
+      const roleText   = ri >= 0 ? cells[ri]
+        : cells.filter((_, j) => j !== ni && j !== si && j !== fi).join(' | ');
+
+      npcs.push({
+        name,
+        status:  normalizeNPCStatus(statusSrc),
+        faction: normalizeFaction(factionSrc),
+        role:    (roleText || (si >= 0 ? cells[si] : '')).slice(0, 160),
+        source:  sourceLabel,
+      });
+      continue;
+    }
+
+    // Reset table state when leaving the table block
+    if (raw && !raw.startsWith('|')) {
+      if (afterSeparator) { afterSeparator = false; tableHeaders = null; }
+    }
+
+    // ── Bold/list entry under an NPC heading ──
+    // e.g. "**Name** — role" or "- **Name**: description"
+    if (inNPCSection && raw) {
+      const m = raw.match(/^[-*•]?\s*\*{1,2}([A-Z][^*\n]{1,65}?)\*{1,2}\s*[—–:]\s*(.{5,})/);
+      if (m) {
+        const name = m[1].trim();
+        const rest = m[2].trim();
+        if (!/^[-=]+$/.test(name)) {
+          npcs.push({
+            name,
+            status:  normalizeNPCStatus(rest),
+            faction: normalizeFaction(rest),
+            role:    rest.slice(0, 160),
+            source:  sourceLabel,
+          });
+        }
+      }
+    }
+  }
+
+  return npcs;
+}
+
+async function getAllNPCRoster() {
+  return cached('npc-roster', async () => {
+    // Gather all source documents in parallel
+    const [worldBible, hubDocs, eventsLog, npcEngine, playerFolders] = await Promise.all([
+      getWorldBible(),
+      getHubDocs(),
+      getEventsLog(),
+      // NPC Personality Engine — dedicated NPC design doc in root
+      cached('npc-engine', async () => {
+        const files = await getRootFiles();
+        const f = findBestFile(files, /npc\s*personality/i);
+        return f ? driveExport(f.id, 'text/markdown').catch(() => driveExport(f.id)).catch(() => '') : '';
+      }),
+      getPlayerFolders(),
+    ]);
+
+    const STATUS_RANK = { deceased: 3, gone: 2, active: 1 };
+    const roster = new Map(); // npcKey → record
+
+    // Sources are processed from least-to-most authoritative.
+    // For the SAME status rank, later sources overwrite (last-seen wins = most specific/recent).
+    // A higher status rank (deceased > gone > active) ALWAYS wins regardless of order —
+    // once an NPC is known dead they stay dead even if an older document lists them as active.
+    function addNPC(npc, source) {
+      const key = npcKey(npc.name);
+      if (!key || key.length < 2) return;
+      const existing = roster.get(key);
+      if (!existing) { roster.set(key, { ...npc, source }); return; }
+      const rankNew = STATUS_RANK[npc.status] || 0;
+      const rankOld = STATUS_RANK[existing.status] || 0;
+      // Only replace if new record is same-or-higher rank (never downgrade deceased→active)
+      if (rankNew >= rankOld) roster.set(key, { ...npc, source });
+    }
+
+    // 1. World Bible — foundational lore, least authoritative for current state
+    for (const npc of parseNPCsFromText(worldBible, 'World Bible')) addNPC(npc, 'World Bible');
+
+    // 2. Hub docs — current location/faction rosters
+    for (const hub of hubDocs)
+      for (const npc of parseNPCsFromText(hub.content, hub.name)) addNPC(npc, hub.name);
+
+    // 3. NPC Personality Engine — explicit NPC design notes
+    if (npcEngine)
+      for (const npc of parseNPCsFromText(npcEngine, 'NPC Engine')) addNPC(npc, 'NPC Engine');
+
+    // 4. Events Log — public events often mention NPCs with status context
+    if (eventsLog)
+      for (const npc of parseNPCsFromText(eventsLog, 'Events Log')) addNPC(npc, 'Events Log');
+
+    // 5. Player story threads + interaction queues — most authoritative (session outcomes)
+    const playerData = await Promise.all(
+      playerFolders.filter(p => p.id && p.name).map(async p => {
+        try { return { player: p.name, data: await getPlayerData(p.id, p.name) }; }
+        catch { return null; }
+      })
+    );
+
+    for (const pd of playerData.filter(Boolean)) {
+      // handoff = most recent session state; history = full story thread archive; interactionQueue = pending NPC plans
+      const fullText = [
+        pd.data.handoff         || '',
+        pd.data.interactionQueue|| '',
+        pd.data.history         || '',
+      ].join('\n\n');
+      for (const npc of parseNPCsFromText(fullText, pd.player + "'s story"))
+        addNPC(npc, pd.player + "'s story");
+    }
+
+    // Sort: active (1) first, gone (2) next, deceased (3) last; alpha within each group
+    return [...roster.values()].sort((a, b) => {
+      const ra = STATUS_RANK[a.status] || 0;
+      const rb = STATUS_RANK[b.status] || 0;
+      return ra !== rb ? ra - rb : a.name.localeCompare(b.name);
+    });
+  });
+}
+
+function renderNPCRoster(npcs) {
+  if (!npcs.length) return '<p class="empty-note">No NPCs found.</p>';
+
+  const factionClass = f => f ? `npc-faction npc-faction-${f.toLowerCase()}` : 'npc-faction npc-faction-none';
+  const statusLabel  = { active: 'Active', deceased: 'Deceased', gone: 'Gone' };
+
+  const card = npc => {
+    const isGone = npc.status === 'deceased' || npc.status === 'gone';
+    return `
+    <div class="npc-card${isGone ? ' npc-card-gone' : ''}">
+      <div class="npc-name">${esc(npc.name)}</div>
+      <div class="npc-badges">
+        ${npc.faction ? `<span class="${factionClass(npc.faction)}">${esc(npc.faction)}</span>` : ''}
+        <span class="npc-status npc-status-${npc.status}">${statusLabel[npc.status] || 'Active'}</span>
+      </div>
+      ${npc.role ? `<div class="npc-role">${esc(npc.role)}</div>` : ''}
+      <div class="npc-source">${esc(npc.source)}</div>
+    </div>`;
+  };
+
+  // Group: active/gone first, deceased at bottom behind a toggle
+  const living  = npcs.filter(n => n.status !== 'deceased');
+  const dead    = npcs.filter(n => n.status === 'deceased');
+
+  const deadSection = dead.length ? `
+    <details class="history-toggle npc-dead-toggle" style="margin-top:1rem">
+      <summary>Deceased (${dead.length})</summary>
+      <div class="npc-grid history-body" style="margin-top:0.75rem">${dead.map(card).join('')}</div>
+    </details>` : '';
+
+  return `
+    <div class="npc-grid">${living.map(card).join('')}</div>
+    ${deadSection}`;
 }
 
 // ── Markdown section helpers ─────────────────────────────────────────
@@ -779,9 +1025,11 @@ async function renderCharacter(name) {
 async function renderCity() {
   showLoading('Reading the world bible\u2026');
 
-  let worldBible = '', wod = '', hubDocs = [];
+  let worldBible = '', wod = '', hubDocs = [], npcs = [];
   try {
-    [worldBible, wod, hubDocs] = await Promise.all([getWorldBible(), getWodFoundation(), getHubDocs()]);
+    [worldBible, wod, hubDocs, npcs] = await Promise.all([
+      getWorldBible(), getWodFoundation(), getHubDocs(), getAllNPCRoster(),
+    ]);
   } catch (e) { showError('Could not load city data', e.message, true); return; }
 
   const activeHubs = hubDocs.filter(h => h.content.trim()).map(h => ({
@@ -790,13 +1038,30 @@ async function renderCity() {
   }));
 
   setSideNav([
-    { title: 'City', items: [{ href: '#', label: 'Overview', scrollTo: 'city-overview' }] },
+    { title: 'City', items: [
+      { href: '#', label: 'Overview', scrollTo: 'city-overview' },
+      ...(npcs.length ? [{ href: '#', label: 'NPCs', scrollTo: 'city-npcs' }] : []),
+    ]},
     ...(activeHubs.length ? [{ title: 'Hubs', items: activeHubs.map(h => ({ href: '#/city', label: h.name, scrollTo: h.id })) }] : []),
   ]);
+
+  const npcSection = `
+    <div class="card" id="city-npcs">
+      <h2>NPC Roster</h2>
+      ${npcs.length ? renderNPCRoster(npcs) : '<p class="empty-note">No NPC data found.</p>'}
+    </div>`;
 
   const hubCards = activeHubs.map(h =>
     `<div class="card" id="${h.id}"><h2>${esc(h.name)}</h2><div class="prose">${md(h.content)}</div></div>`
   ).join('');
+
+  const worldBibleCollapsible = worldBible ? `
+    <div class="card">
+      <details class="history-toggle">
+        <summary>World Bible</summary>
+        <div class="prose history-body">${md(worldBible)}</div>
+      </details>
+    </div>` : '';
 
   const wodCollapsible = wod ? `
     <div class="card">
@@ -812,8 +1077,9 @@ async function renderCity() {
       <p>The shared world state. What is real, what is hidden, what is hunted.</p>
     </div>
     <div style="display:flex;flex-direction:column;gap:1.5rem;max-width:52rem">
-      <div class="card"><h2>World Bible</h2><div class="prose">${md(worldBible)}</div></div>
+      ${npcSection}
       ${hubCards}
+      ${worldBibleCollapsible}
       ${wodCollapsible}
     </div>`;
 }
