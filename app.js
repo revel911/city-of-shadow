@@ -1097,9 +1097,14 @@ async function renderCity() {
       ${npcs.length ? renderNPCRoster(npcs) : '<p class="empty-note">No NPC data found.</p>'}
     </div>`;
 
-  const hubCards = activeHubs.map(h =>
-    `<div class="card" id="${h.id}"><h2>${esc(h.name)}</h2><div class="prose">${md(h.content)}</div></div>`
-  ).join('');
+  // Strip NPC sections before display — personality mechanics are GM-only.
+  // The NPC roster card above the hubs is the player-facing view of who's here.
+  const NPC_HEADINGS = /\bnpcs?|cast|characters?|(?:key\s+)?figures?|notable|roster|personalities|residents?|people\b/i;
+
+  const hubCards = activeHubs.map(h => {
+    const display = excludeMarkdownSections(h.content, NPC_HEADINGS);
+    return `<div class="card" id="${h.id}"><h2>${esc(h.name)}</h2><div class="prose">${md(display)}</div></div>`;
+  }).join('');
 
   const worldBibleCollapsible = worldBible ? `
     <div class="card">
