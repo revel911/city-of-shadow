@@ -1070,6 +1070,13 @@ body.nav-open #nav-overlay { display: block; }
 
 .npc-dead-toggle summary { margin-top: 0.5rem; }
 
+/* ── Flex column stack (replaces inline max-width layout wrappers) ── */
+.page-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
 /* ── Desktop (1024px+) ──────────────────────────────────────────── */
 @media (min-width: 1024px) {
   #nav-toggle { display: none; }
@@ -1084,7 +1091,43 @@ body.nav-open #nav-overlay { display: block; }
   .page-header h1 { font-size: 3.2rem; }
 
   .card { padding: 1.5rem; }
-  .card h2 { font-size: 0.85rem; font-family: 'JetBrains Mono', monospace;}
+  .card h2 { font-size: 0.85rem; font-family: 'JetBrains Mono', monospace; }
 
-  .dashboard-grid { max-width: 64rem; }
+  .dashboard-grid { max-width: 80rem; }
+}
+
+/* ── Wide (1440px+) ─────────────────────────────────────────────── */
+@media (min-width: 1440px) {
+  #side-nav { width: 13rem; }
+  #content  { padding: 3rem 3.5rem; }
+
+  .page-header h1 { font-size: 3.6rem; }
+
+  .dashboard-grid { max-width: none; }
+
+  .char-grid {
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  }
+
+  .npc-grid {
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  }
+
+  .two-col { gap: 1.75rem; }
+}
+
+/* ── Ultrawide (1920px+) ────────────────────────────────────────── */
+@media (min-width: 1920px) {
+  #side-nav { width: 15rem; }
+  #content  { padding: 3.5rem 4.5rem; }
+
+  .page-header h1 { font-size: 4rem; }
+
+  .char-grid {
+    grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  }
+
+  .npc-grid {
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  }
 }

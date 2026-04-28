@@ -384,6 +384,56 @@ function parseNPCsFromText(text, sourceLabel) {
   return npcs;
 }
 
+// Pull NPCs from the structured YAML handoff fields that the markdown table parser cannot reach.
+// open_interactions format: "Name — context"; tension_threads / must_not_forget are free-text
+// but we mine them for deceased/gone indicators since those signal irreversible status changes.
+function extractNPCsFromYamlHandoff(handoffText, sourceLabel) {
+  if (!handoffText || !isYamlHandoff(handoffText)) return [];
+  const data = parseYamlHandoff(handoffText);
+  const npcs = [];
+
+  // open_interactions — most reliable: "NPC Name — what's happening"
+  for (const item of data.open_interactions) {
+    const s = (item || '').trim();
+    if (!s) continue;
+    // Require em/en-dash separator so we can cleanly split name from context
+    const sep = s.search(/\s*[—–]\s*/);
+    if (sep <= 0) continue;
+    const name = s.slice(0, sep).replace(/^["'`]|["'`]$/g, '').trim();
+    const context = s.slice(sep).replace(/^[—–]\s*/, '').trim();
+    // Sanity-check: name should start uppercase and not contain lowercase interior words
+    if (!name || name.length < 2 || name.length > 70) continue;
+    if (!/^[A-Z"']/.test(name) || /[a-z]\s+[a-z]/.test(name)) continue;
+    npcs.push({
+      name,
+      status:  normalizeNPCStatus(context || s),
+      faction: normalizeFaction(context || s),
+      role:    context.slice(0, 160),
+      source:  sourceLabel,
+    });
+  }
+
+  // tension_threads + must_not_forget — mine only for deceased/gone signals;
+  // 'active' entries here are too ambiguous to extract reliably as NPC records.
+  const mineForDeceased = [...data.tension_threads, ...data.must_not_forget];
+  for (const item of mineForDeceased) {
+    const s = (item || '').trim();
+    if (!s) continue;
+    const status = normalizeNPCStatus(s);
+    if (status === 'active') continue; // skip — can't safely identify the NPC from free text
+    // Extract 2-word+ Title Case proper names from the text
+    const nameRe = /\b([A-Z][a-z]{1,}(?:\s+[A-Z][a-z]{1,})+)\b/g;
+    let m;
+    while ((m = nameRe.exec(s)) !== null) {
+      const name = m[1];
+      if (name.length < 4 || name.length > 60) continue;
+      npcs.push({ name, status, faction: normalizeFaction(s), role: s.slice(0, 160), source: sourceLabel });
+    }
+  }
+
+  return npcs;
+}
+
 async function getAllNPCRoster() {
   return cached('npc-roster', async () => {
     // Gather all source documents in parallel
@@ -442,14 +492,22 @@ async function getAllNPCRoster() {
     );
 
     for (const pd of playerData.filter(Boolean)) {
-      // handoff = most recent session state; history = full story thread archive; interactionQueue = pending NPC plans
+      const label = pd.player + "'s story";
+
+      // Pass 1 — YAML fields: open_interactions, tension_threads, must_not_forget
+      // This is where most session NPCs live in structured handoffs
+      for (const npc of extractNPCsFromYamlHandoff(pd.data.handoff, label))
+        addNPC(npc, label);
+
+      // Pass 2 — Markdown tables + bold-list entries across all fetched text
+      // Covers story threads with explicit NPC tables and any non-YAML content
       const fullText = [
-        pd.data.handoff         || '',
-        pd.data.interactionQueue|| '',
-        pd.data.history         || '',
+        pd.data.handoff          || '',
+        pd.data.interactionQueue || '',
+        pd.data.history          || '',
       ].join('\n\n');
-      for (const npc of parseNPCsFromText(fullText, pd.player + "'s story"))
-        addNPC(npc, pd.player + "'s story");
+      for (const npc of parseNPCsFromText(fullText, label))
+        addNPC(npc, label);
     }
 
     // Sort: active (1) first, gone (2) next, deceased (3) last; alpha within each group
@@ -1076,7 +1134,7 @@ async function renderCity() {
       <h1>Richmond, Virginia</h1>
       <p>The shared world state. What is real, what is hidden, what is hunted.</p>
     </div>
-    <div style="display:flex;flex-direction:column;gap:1.5rem;max-width:52rem">
+    <div class="page-stack">
       ${npcSection}
       ${hubCards}
       ${worldBibleCollapsible}
@@ -1174,7 +1232,7 @@ async function renderEvents() {
       <h1>Public Events Log</h1>
       <p>The city&rsquo;s memory. Append-only. Everything that happened, happened.</p>
     </div>
-    <div class="card" style="max-width:46rem">${body}</div>`;
+    <div class="card">${body}</div>`;
 }
 
 // ── Router ───────────────────────────────────────────────────────────
