@@ -1,8 +1,11 @@
 // ── Config — edit these two values ──────────────────────────────────
 const CONFIG = {
-  ROOT_FOLDER_ID: '1La--TBYjyQswMksN7EYwcbVxUlutsxTR',
-  API_KEY: 'AIzaSyCvu6iSrATB8vqVxBdNrglS3IvdGlhRCFk',
-  EVENTS_DOC_ID: '1xd-JLhFHlrT0aDxgDC2f2Z6pUPLsC0gt6LborBMv-dc',
+  ROOT_FOLDER_ID:   '1La--TBYjyQswMksN7EYwcbVxUlutsxTR',
+  API_KEY:          'AIzaSyCvu6iSrATB8vqVxBdNrglS3IvdGlhRCFk',
+  EVENTS_DOC_ID:    '1xd-JLhFHlrT0aDxgDC2f2Z6pUPLsC0gt6LborBMv-dc',
+  WORLD_FOLDER_ID:  '1Z8Tci3qh8bByNcK3YyLSdWD0fjKgAj7X',
+  MC_REF_FOLDER_ID: '1nB9SSdKI-8-kCGqpRrr8ayIL_CnCQvV2',
+  NPC_SHEET_ID:     '1FuXCzbcr_gquNy2j6HIp1cOvjnxeD_8AbsoWffrSyak',
 };
 
 // ── Simple in-session cache (clears on page reload) ──────────────────
@@ -57,6 +60,14 @@ function findBestFile(files, pattern) {
 // ── Data fetchers ────────────────────────────────────────────────────
 async function getRootFiles() {
   return cached('root', () => driveList(CONFIG.ROOT_FOLDER_ID));
+}
+
+async function getWorldFiles() {
+  return cached('world-files', () => driveList(CONFIG.WORLD_FOLDER_ID));
+}
+
+async function getMCRefFiles() {
+  return cached('mc-ref-files', () => driveList(CONFIG.MC_REF_FOLDER_ID));
 }
 
 async function getPlayerFolders() {
@@ -132,8 +143,10 @@ async function getPlayerData(folderId, playerName = '') {
 
 async function getWorldBible() {
   return cached('world-bible', async () => {
-    const files = await getRootFiles();
-    const f = files.find(f => /world.bible/i.test(f.name) || f.name.startsWith('00'));
+    const files = await getWorldFiles();
+    const f = files.find(f =>
+      f.mimeType === 'application/vnd.google-apps.document' && /world.bible/i.test(f.name)
+    );
     return f ? driveExport(f.id) : '';
   });
 }
@@ -180,31 +193,45 @@ async function getEventsLog() {
 
 async function getWodFoundation() {
   return cached('wod', async () => {
-    const files = await getRootFiles();
-    const f = findBestFile(files, /wod\s*foundation|world\s*of\s*darkness/i);
+    const files = await getMCRefFiles();
+    const f = findBestFile(files, /world\s*of\s*darkness/i);
     return f ? driveExport(f.id) : '';
   });
 }
 
 async function getHubDocs() {
   return cached('hubs', async () => {
-    const files = await getRootFiles();
-    const hubsFolder = files.find(f =>
+    // Hubs is now World/Hubs/ — each hub is a folder containing "Hub" + "NPC" docs
+    const worldFiles = await getWorldFiles();
+    const hubsFolder = worldFiles.find(f =>
       f.mimeType === 'application/vnd.google-apps.folder' && /^hubs$/i.test(f.name)
     );
     if (!hubsFolder) return [];
 
-    const hubFiles = await driveList(hubsFolder.id);
-    const docs = hubFiles
-      .filter(f => f.mimeType === 'application/vnd.google-apps.document')
+    const hubFolders = (await driveList(hubsFolder.id))
+      .filter(f => f.mimeType === 'application/vnd.google-apps.folder')
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    return Promise.all(docs.map(async f => ({
-      name: f.name.replace(/^Hub\s*[—–-]\s*/i, ''), // strip "Hub — " prefix for display
-      rawName: f.name,
-      // markdown export preserves tables and headings for NPC parsing + better display
-      content: await driveExport(f.id, 'text/markdown').catch(() => driveExport(f.id)).catch(() => ''),
-    })));
+    return Promise.all(hubFolders.map(async folder => {
+      const files = await driveList(folder.id);
+      const hubDoc = files.find(f =>
+        /^hub$/i.test(f.name) && f.mimeType === 'application/vnd.google-apps.document'
+      );
+      const npcDoc = files.find(f =>
+        /^npc$/i.test(f.name) && f.mimeType === 'application/vnd.google-apps.document'
+      );
+
+      const [content, npcContent] = await Promise.all([
+        hubDoc
+          ? driveExport(hubDoc.id, 'text/markdown').catch(() => driveExport(hubDoc.id)).catch(() => '')
+          : Promise.resolve(''),
+        npcDoc
+          ? driveExport(npcDoc.id, 'text/markdown').catch(() => driveExport(npcDoc.id)).catch(() => '')
+          : Promise.resolve(''),
+      ]);
+
+      return { name: folder.name, rawName: folder.name, content, npcContent };
+    }));
   });
 }
 
@@ -384,6 +411,62 @@ function parseNPCsFromText(text, sourceLabel) {
   return npcs;
 }
 
+// Parse a single CSV line respecting quoted fields
+function parseCSVRow(line) {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
+      else inQuotes = !inQuotes;
+    } else if (ch === ',' && !inQuotes) {
+      result.push(current); current = '';
+    } else {
+      current += ch;
+    }
+  }
+  result.push(current);
+  return result;
+}
+
+// Parse the master NPC spreadsheet (CSV export)
+// Columns: Name, Location / Hub, Description / Role, Faction / Circle, Player Interaction, Status
+function parseNPCsFromCSV(csv) {
+  if (!csv) return [];
+  const lines = csv.split('\n').map(l => l.trim()).filter(Boolean);
+  if (lines.length < 2) return [];
+
+  const headers = parseCSVRow(lines[0]).map(h => h.toLowerCase().trim());
+  const ni = headers.findIndex(h => /^name$/.test(h));
+  const li = headers.findIndex(h => /location|hub/.test(h));
+  const ri = headers.findIndex(h => /description|role/.test(h));
+  const fi = headers.findIndex(h => /faction|circle/.test(h));
+  const si = headers.findIndex(h => /^status$/.test(h));
+  if (ni < 0) return [];
+
+  return lines.slice(1).flatMap(line => {
+    const cells = parseCSVRow(line);
+    const name = (cells[ni] || '').trim();
+    if (!name || name.length < 2) return [];
+    return [{
+      name,
+      status:  normalizeNPCStatus(si >= 0 ? cells[si] : ''),
+      faction: normalizeFaction(fi >= 0 ? cells[fi] : ''),
+      role:    ri >= 0 ? (cells[ri] || '').slice(0, 160) : '',
+      source:  li >= 0 ? (cells[li] || '').trim() : 'NPC Roster',
+    }];
+  });
+}
+
+async function getNPCSpreadsheet() {
+  return cached('npc-sheet', async () => {
+    if (!CONFIG.NPC_SHEET_ID) return '';
+    return driveExport(CONFIG.NPC_SHEET_ID, 'text/csv').catch(() => '');
+  });
+}
+
 // Pull NPCs from the structured YAML handoff fields that the markdown table parser cannot reach.
 // open_interactions format: "Name — context"; tension_threads / must_not_forget are free-text
 // but we mine them for deceased/gone indicators since those signal irreversible status changes.
@@ -436,11 +519,11 @@ function extractNPCsFromYamlHandoff(handoffText, sourceLabel) {
 
 async function getAllNPCRoster() {
   return cached('npc-roster', async () => {
-    // Gather all source documents in parallel
-    const [worldBible, hubDocs, eventsLog, playerFolders] = await Promise.all([
+    const [worldBible, hubDocs, eventsLog, npcCsv, playerFolders] = await Promise.all([
       getWorldBible(),
       getHubDocs(),
       getEventsLog(),
+      getNPCSpreadsheet(),
       getPlayerFolders(),
     ]);
 
@@ -465,15 +548,20 @@ async function getAllNPCRoster() {
     // 1. World Bible — foundational lore, least authoritative for current state
     for (const npc of parseNPCsFromText(worldBible, 'World Bible')) addNPC(npc, 'World Bible');
 
-    // 2. Hub docs — current location/faction rosters
-    for (const hub of hubDocs)
-      for (const npc of parseNPCsFromText(hub.content, hub.name)) addNPC(npc, hub.name);
+    // 2. Hub NPC docs — per-hub rosters (dedicated NPC doc inside each hub folder)
+    for (const hub of hubDocs) {
+      const src = hub.name;
+      for (const npc of parseNPCsFromText(hub.npcContent || hub.content, src)) addNPC(npc, src);
+    }
 
-    // 3. Events Log — public events often mention NPCs with status context
+    // 3. Master NPC spreadsheet — canonical roster, overwrites hub-doc entries
+    for (const npc of parseNPCsFromCSV(npcCsv)) addNPC(npc, npc.source);
+
+    // 4. Events Log — status updates from public record
     if (eventsLog)
       for (const npc of parseNPCsFromText(eventsLog, 'Events Log')) addNPC(npc, 'Events Log');
 
-    // 5. Player story threads + interaction queues — most authoritative (session outcomes)
+    // 5. Player story threads + interaction queues — most authoritative for session outcomes
     const playerData = await Promise.all(
       playerFolders.filter(p => p.id && p.name).map(async p => {
         try { return { player: p.name, data: await getPlayerData(p.id, p.name) }; }
