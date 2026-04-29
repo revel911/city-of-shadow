@@ -154,6 +154,171 @@ a { color: inherit; text-decoration: none; }
 }
 .nav-refresh:hover { color: var(--blood-light); }
 
+#search-btn {
+  background: none;
+  border: none;
+  color: var(--shadow);
+  cursor: pointer;
+  padding: 0.3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color 0.12s;
+  line-height: 1;
+}
+#search-btn:hover { color: var(--parchment); }
+
+/* ── Search Overlay ──────────────────────────────────────────────── */
+#search-overlay {
+  display: none;
+  position: fixed;
+  top: var(--nav-h);
+  left: 0; right: 0; bottom: 0;
+  z-index: 195;
+  background: rgba(3, 3, 5, 0.9);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  padding: 1.5rem 1rem 2rem;
+  overflow-y: auto;
+}
+#search-overlay.open { display: block; }
+
+#search-box {
+  max-width: 44rem;
+  margin: 0 auto;
+}
+
+#search-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-blood);
+  padding: 0.65rem 0.85rem;
+  box-shadow: 0 0 40px rgba(168, 22, 22, 0.12);
+}
+
+#search-icon {
+  color: var(--shadow);
+  flex-shrink: 0;
+}
+
+#search-input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--parchment);
+  font-family: 'DM Sans', system-ui, sans-serif;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  min-width: 0;
+}
+#search-input::placeholder { color: var(--shadow); }
+#search-input::-webkit-search-cancel-button { display: none; }
+
+#search-esc-hint {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  color: var(--shadow);
+  border: 1px solid var(--border);
+  padding: 0.1rem 0.35rem;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+#search-results {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.search-group-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--shadow);
+  padding: 0.5rem 0 0.25rem;
+}
+
+.search-result {
+  display: grid;
+  grid-template-columns: 3.5rem 1fr;
+  gap: 0.2rem 0.75rem;
+  align-items: start;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  padding: 0.7rem 0.9rem;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+  text-align: left;
+  width: 100%;
+}
+.search-result:hover {
+  border-color: var(--border-blood);
+  background: var(--bg-hover);
+}
+
+.search-result-type {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.5rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--shadow);
+  border: 1px solid var(--border);
+  padding: 0.12rem 0.3rem;
+  white-space: nowrap;
+  justify-self: start;
+  margin-top: 0.15rem;
+}
+.search-result-type-npc       { color: var(--gold-light);  border-color: var(--gold);    }
+.search-result-type-arc       { color: var(--blood-light); border-color: var(--blood);   }
+.search-result-type-hub       { color: var(--mist);        border-color: #2d1a55;        }
+.search-result-type-character { color: var(--faded);       border-color: var(--border);  }
+
+.search-result-body { min-width: 0; }
+
+.search-result-title {
+  font-size: 0.88rem;
+  color: var(--parchment);
+  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-result-sub {
+  font-size: 0.75rem;
+  color: var(--faded);
+  font-style: italic;
+  margin-top: 0.1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-empty {
+  color: var(--shadow);
+  font-style: italic;
+  font-size: 0.875rem;
+  text-align: center;
+  padding: 2rem 0;
+}
+
+.search-loading {
+  color: var(--shadow);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 2rem 0;
+}
+
 /* Hamburger button */
 #nav-toggle {
   display: flex;
@@ -1029,6 +1194,31 @@ body.nav-open #nav-overlay { display: block; }
   color: var(--shadow);
 }
 
+.npc-hub {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.55rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--shadow);
+  margin-top: -0.1rem;
+}
+
+.npc-role {
+  font-size: 0.78rem;
+  color: var(--faded);
+  line-height: 1.45;
+  font-style: italic;
+}
+
+.npc-interaction {
+  font-size: 0.72rem;
+  color: var(--gold-light);
+  line-height: 1.4;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--border);
+  margin-top: auto;
+}
+
 .npc-badges {
   display: flex;
   flex-wrap: wrap;
@@ -1059,6 +1249,165 @@ body.nav-open #nav-overlay { display: block; }
 
 
 .npc-dead-toggle summary { margin-top: 0.5rem; }
+
+/* ── Active Threats ─────────────────────────────────────────────── */
+.threat-group { margin-bottom: 1.75rem; }
+.threat-group:last-child { margin-bottom: 0; }
+
+.threat-group-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.6rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--shadow);
+  margin-bottom: 0.65rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.threat-card {
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-left-width: 2px;
+  padding: 0.85rem 1rem;
+  margin-bottom: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.threat-card:last-child { margin-bottom: 0; }
+
+.threat-escalation-critical { border-left-color: var(--blood-bright); }
+.threat-escalation-elevated  { border-left-color: var(--gold);        }
+.threat-escalation-simmering { border-left-color: var(--mist);        }
+
+.threat-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.threat-id {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.1em;
+  color: var(--shadow);
+  flex-shrink: 0;
+}
+
+.threat-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.84rem;
+  color: var(--parchment);
+  font-weight: 400;
+  flex: 1;
+}
+
+.threat-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.5rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 0.08rem 0.35rem;
+  border: 1px solid;
+  flex-shrink: 0;
+}
+
+.threat-badge-critical { color: var(--blood-light); border-color: var(--blood);  }
+.threat-badge-elevated  { color: var(--gold-light);  border-color: var(--gold);   }
+.threat-badge-simmering { color: var(--mist);        border-color: #2d1a55;       }
+
+.threat-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.threat-meta-item {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--shadow);
+}
+
+.threat-meta-sep {
+  color: var(--border-blood);
+  font-size: 0.7rem;
+}
+
+.threat-desc {
+  font-size: 0.82rem;
+  color: var(--faded);
+  line-height: 1.6;
+  margin-top: 0.15rem;
+}
+
+.threat-desc p { margin-bottom: 0.4rem; color: var(--faded); }
+.threat-desc p:last-child { margin-bottom: 0; }
+.threat-desc strong { color: var(--parchment); font-weight: 500; }
+
+.threat-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.25rem;
+}
+
+.threat-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.5rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--shadow);
+  border: 1px solid var(--border);
+  padding: 0.08rem 0.3rem;
+  white-space: nowrap;
+}
+
+.threat-tag-player { color: var(--gold-light); border-color: var(--gold);        }
+.threat-tag-npc    { color: var(--faded);      border-color: var(--border-blood); }
+
+.threat-mc-notes {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+}
+
+.threat-mc-notes summary {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--blood-light);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  transition: color 0.12s;
+}
+
+.threat-mc-notes summary::before {
+  content: '▸';
+  font-size: 0.55rem;
+  transition: transform 0.18s;
+}
+
+.threat-mc-notes[open] summary::before { transform: rotate(90deg); }
+.threat-mc-notes summary:hover { color: var(--blood-bright); }
+
+.threat-mc-body {
+  font-size: 0.78rem;
+  color: var(--faded);
+  line-height: 1.6;
+  margin-top: 0.5rem;
+  font-style: italic;
+}
 
 /* ── Flex column stack (replaces inline max-width layout wrappers) ── */
 .page-stack {

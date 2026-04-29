@@ -6,6 +6,7 @@ const CONFIG = {
   WORLD_FOLDER_ID:  '1Z8Tci3qh8bByNcK3YyLSdWD0fjKgAj7X',
   MC_REF_FOLDER_ID: '1nB9SSdKI-8-kCGqpRrr8ayIL_CnCQvV2',
   NPC_SHEET_ID:     '1FuXCzbcr_gquNy2j6HIp1cOvjnxeD_8AbsoWffrSyak',
+  THREATS_DOC_ID:   '15VbiBkavfVPNvDchMY6_OwfNOgIVWsBy8u_QIgYN3Pw',
 };
 
 // ── Simple in-session cache (clears on page reload) ──────────────────
@@ -217,20 +218,10 @@ async function getHubDocs() {
       const hubDoc = files.find(f =>
         /^hub$/i.test(f.name) && f.mimeType === 'application/vnd.google-apps.document'
       );
-      const npcDoc = files.find(f =>
-        /^npc$/i.test(f.name) && f.mimeType === 'application/vnd.google-apps.document'
-      );
-
-      const [content, npcContent] = await Promise.all([
-        hubDoc
-          ? driveExport(hubDoc.id, 'text/markdown').catch(() => driveExport(hubDoc.id)).catch(() => '')
-          : Promise.resolve(''),
-        npcDoc
-          ? driveExport(npcDoc.id, 'text/markdown').catch(() => driveExport(npcDoc.id)).catch(() => '')
-          : Promise.resolve(''),
-      ]);
-
-      return { name: folder.name, rawName: folder.name, content, npcContent };
+      const content = hubDoc
+        ? await driveExport(hubDoc.id, 'text/markdown').catch(() => driveExport(hubDoc.id)).catch(() => '')
+        : '';
+      return { name: folder.name, rawName: folder.name, content };
     }));
   });
 }
@@ -298,119 +289,6 @@ function normalizeFaction(text) {
   return m ? m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase() : '';
 }
 
-// Canonical dedup key: strip all common titles iteratively, remove quoted nicknames.
-function npcKey(name) {
-  const TITLE = /^(?:det\.?|sgt\.?|dr\.?|father|fr\.?|mr\.?|ms\.?|mrs\.?|prof\.?|sir|lady|judge|councilor|the|rev\.?|lt\.?|col\.?|officer|chief)\s+/i;
-  let k = name.toLowerCase().trim();
-  // Strip titles from the front repeatedly to handle chained prefixes ("Det. Sgt. …")
-  let prev;
-  do { prev = k; k = k.replace(TITLE, ''); } while (k !== prev);
-  // Remove quoted nicknames e.g. 'Ghost' or "Iron"
-  return k.replace(/["'"'][^"'"']{1,30}["'"']/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-// Extract NPCs from any document text (handles markdown tables + bold-list entries under NPC headings).
-function parseNPCsFromText(text, sourceLabel) {
-  if (!text) return [];
-  const npcs = [];
-  const lines = text.split('\n');
-
-  let inNPCSection = false;
-  let sectionDepth = 0;
-  let tableHeaders = null;
-  let afterSeparator = false;
-
-  for (const line of lines) {
-    const raw = line.trim();
-
-    // ── Heading ──
-    const hm = raw.match(/^(#{1,6})\s+(.*)/);
-    if (hm) {
-      const depth = hm[1].length;
-      const title = hm[2];
-      if (inNPCSection && depth <= sectionDepth) inNPCSection = false;
-      // Broad set of headings that signal an NPC listing follows
-      if (/\bnpcs?|cast|characters?|(?:key\s+)?figures?|notable|roster|dramatis|who.?s\s*here|residents?|personalities|people\b/i.test(title)) {
-        inNPCSection = true;
-        sectionDepth = depth;
-      }
-      tableHeaders = null;
-      afterSeparator = false;
-      continue;
-    }
-
-    // ── Markdown table row ──
-    if (raw.startsWith('|')) {
-      const cells = raw.split('|').slice(1, -1).map(c => c.trim());
-      if (!cells.length) continue;
-
-      // Separator row
-      if (cells.every(c => /^[-:]+$/.test(c))) { afterSeparator = true; continue; }
-
-      if (!afterSeparator) {
-        // Header row — record column map
-        const hl = cells.map(c => c.toLowerCase().replace(/\*+/g, '').trim());
-        const hasStatus = hl.some(h => /^status$/.test(h));
-        const hasName   = hl.some(h => /^(npc|name|character|person)$/.test(h));
-        tableHeaders = (hasName || hasStatus || inNPCSection) ? hl : null;
-        continue;
-      }
-
-      // Data row — only parse if we have column context or are in an NPC section
-      if (!tableHeaders && !inNPCSection) continue;
-
-      const hl = tableHeaders || [];
-      const ni = Math.max(0, hl.findIndex(h => /^(npc|name|character|person)$/.test(h)));
-      const si = hl.findIndex(h => /^status$/.test(h));
-      const fi = hl.findIndex(h => /^(faction|affiliation)$/.test(h));
-      const ri = hl.findIndex(h => /^(role|description|notes|context|relationship|key\s*notes?)$/.test(h));
-
-      const name = (cells[ni] || '').replace(/\*+|\[|\]/g, '').trim();
-      if (!name || name.length < 2 || /^[-=]+$/.test(name)) continue;
-
-      const statusSrc  = si >= 0 ? cells[si] : cells.filter((_, j) => j !== ni).join(' ');
-      const factionSrc = fi >= 0 ? cells[fi] : cells.join(' ');
-      const roleText   = ri >= 0 ? cells[ri]
-        : cells.filter((_, j) => j !== ni && j !== si && j !== fi).join(' | ');
-
-      npcs.push({
-        name,
-        status:  normalizeNPCStatus(statusSrc),
-        faction: normalizeFaction(factionSrc),
-        role:    (roleText || (si >= 0 ? cells[si] : '')).slice(0, 160),
-        source:  sourceLabel,
-      });
-      continue;
-    }
-
-    // Reset table state when leaving the table block
-    if (raw && !raw.startsWith('|')) {
-      if (afterSeparator) { afterSeparator = false; tableHeaders = null; }
-    }
-
-    // ── Bold/list entry under an NPC heading ──
-    // e.g. "**Name** — role" or "- **Name**: description"
-    if (inNPCSection && raw) {
-      const m = raw.match(/^[-*•]?\s*\*{1,2}([A-Z][^*\n]{1,65}?)\*{1,2}\s*[—–:]\s*(.{5,})/);
-      if (m) {
-        const name = m[1].trim();
-        const rest = m[2].trim();
-        if (!/^[-=]+$/.test(name)) {
-          npcs.push({
-            name,
-            status:  normalizeNPCStatus(rest),
-            faction: normalizeFaction(rest),
-            role:    rest.slice(0, 160),
-            source:  sourceLabel,
-          });
-        }
-      }
-    }
-  }
-
-  return npcs;
-}
-
 // Parse a single CSV line respecting quoted fields
 function parseCSVRow(line) {
   const result = [];
@@ -443,6 +321,7 @@ function parseNPCsFromCSV(csv) {
   const li = headers.findIndex(h => /location|hub/.test(h));
   const ri = headers.findIndex(h => /description|role/.test(h));
   const fi = headers.findIndex(h => /faction|circle/.test(h));
+  const pi = headers.findIndex(h => /player.*(interaction|connection|relationship)/i.test(h));
   const si = headers.findIndex(h => /^status$/.test(h));
   if (ni < 0) return [];
 
@@ -450,12 +329,15 @@ function parseNPCsFromCSV(csv) {
     const cells = parseCSVRow(line);
     const name = (cells[ni] || '').trim();
     if (!name || name.length < 2) return [];
+    const rawStatus = si >= 0 ? (cells[si] || '').trim() : '';
+    const playerInteraction = pi >= 0 ? (cells[pi] || '').trim() : '';
     return [{
       name,
-      status:  normalizeNPCStatus(si >= 0 ? cells[si] : ''),
-      faction: normalizeFaction(fi >= 0 ? cells[fi] : ''),
-      role:    ri >= 0 ? (cells[ri] || '').slice(0, 160) : '',
-      source:  li >= 0 ? (cells[li] || '').trim() : 'NPC Roster',
+      status:            normalizeNPCStatus(rawStatus),
+      faction:           normalizeFaction(fi >= 0 ? cells[fi] : ''),
+      role:              ri >= 0 ? (cells[ri] || '').slice(0, 200) : '',
+      playerInteraction: playerInteraction === 'None yet' ? '' : playerInteraction.slice(0, 200),
+      hub:               li >= 0 ? (cells[li] || '').trim() : '',
     }];
   });
 }
@@ -467,129 +349,19 @@ async function getNPCSpreadsheet() {
   });
 }
 
-// Pull NPCs from the structured YAML handoff fields that the markdown table parser cannot reach.
-// open_interactions format: "Name — context"; tension_threads / must_not_forget are free-text
-// but we mine them for deceased/gone indicators since those signal irreversible status changes.
-function extractNPCsFromYamlHandoff(handoffText, sourceLabel) {
-  if (!handoffText || !isYamlHandoff(handoffText)) return [];
-  const data = parseYamlHandoff(handoffText);
-  const npcs = [];
-
-  // open_interactions — most reliable: "NPC Name — what's happening"
-  for (const item of data.open_interactions) {
-    const s = (item || '').trim();
-    if (!s) continue;
-    // Require em/en-dash separator so we can cleanly split name from context
-    const sep = s.search(/\s*[—–]\s*/);
-    if (sep <= 0) continue;
-    const name = s.slice(0, sep).replace(/^["'`]|["'`]$/g, '').trim();
-    const context = s.slice(sep).replace(/^[—–]\s*/, '').trim();
-    // Sanity-check: name should start uppercase and not contain lowercase interior words
-    if (!name || name.length < 2 || name.length > 70) continue;
-    if (!/^[A-Z"']/.test(name) || /[a-z]\s+[a-z]/.test(name)) continue;
-    npcs.push({
-      name,
-      status:  normalizeNPCStatus(context || s),
-      faction: normalizeFaction(context || s),
-      role:    context.slice(0, 160),
-      source:  sourceLabel,
-    });
-  }
-
-  // tension_threads + must_not_forget — mine only for deceased/gone signals;
-  // 'active' entries here are too ambiguous to extract reliably as NPC records.
-  const mineForDeceased = [...data.tension_threads, ...data.must_not_forget];
-  for (const item of mineForDeceased) {
-    const s = (item || '').trim();
-    if (!s) continue;
-    const status = normalizeNPCStatus(s);
-    if (status === 'active') continue; // skip — can't safely identify the NPC from free text
-    // Extract 2-word+ Title Case proper names from the text
-    const nameRe = /\b([A-Z][a-z]{1,}(?:\s+[A-Z][a-z]{1,})+)\b/g;
-    let m;
-    while ((m = nameRe.exec(s)) !== null) {
-      const name = m[1];
-      if (name.length < 4 || name.length > 60) continue;
-      npcs.push({ name, status, faction: normalizeFaction(s), role: s.slice(0, 160), source: sourceLabel });
-    }
-  }
-
-  return npcs;
+async function getThreatsDoc() {
+  return cached('threats', async () => {
+    if (!CONFIG.THREATS_DOC_ID) return '';
+    return driveExport(CONFIG.THREATS_DOC_ID, 'text/plain').catch(() => '');
+  });
 }
 
 async function getAllNPCRoster() {
   return cached('npc-roster', async () => {
-    const [worldBible, hubDocs, eventsLog, npcCsv, playerFolders] = await Promise.all([
-      getWorldBible(),
-      getHubDocs(),
-      getEventsLog(),
-      getNPCSpreadsheet(),
-      getPlayerFolders(),
-    ]);
-
+    const csv = await getNPCSpreadsheet();
+    const npcs = parseNPCsFromCSV(csv);
     const STATUS_RANK = { deceased: 3, gone: 2, active: 1 };
-    const roster = new Map(); // npcKey → record
-
-    // Sources are processed from least-to-most authoritative.
-    // For the SAME status rank, later sources overwrite (last-seen wins = most specific/recent).
-    // A higher status rank (deceased > gone > active) ALWAYS wins regardless of order —
-    // once an NPC is known dead they stay dead even if an older document lists them as active.
-    function addNPC(npc, source) {
-      const key = npcKey(npc.name);
-      if (!key || key.length < 2) return;
-      const existing = roster.get(key);
-      if (!existing) { roster.set(key, { ...npc, source }); return; }
-      const rankNew = STATUS_RANK[npc.status] || 0;
-      const rankOld = STATUS_RANK[existing.status] || 0;
-      // Only replace if new record is same-or-higher rank (never downgrade deceased→active)
-      if (rankNew >= rankOld) roster.set(key, { ...npc, source });
-    }
-
-    // 1. World Bible — foundational lore, least authoritative for current state
-    for (const npc of parseNPCsFromText(worldBible, 'World Bible')) addNPC(npc, 'World Bible');
-
-    // 2. Hub NPC docs — per-hub rosters (dedicated NPC doc inside each hub folder)
-    for (const hub of hubDocs) {
-      const src = hub.name;
-      for (const npc of parseNPCsFromText(hub.npcContent || hub.content, src)) addNPC(npc, src);
-    }
-
-    // 3. Master NPC spreadsheet — canonical roster, overwrites hub-doc entries
-    for (const npc of parseNPCsFromCSV(npcCsv)) addNPC(npc, npc.source);
-
-    // 4. Events Log — status updates from public record
-    if (eventsLog)
-      for (const npc of parseNPCsFromText(eventsLog, 'Events Log')) addNPC(npc, 'Events Log');
-
-    // 5. Player story threads + interaction queues — most authoritative for session outcomes
-    const playerData = await Promise.all(
-      playerFolders.filter(p => p.id && p.name).map(async p => {
-        try { return { player: p.name, data: await getPlayerData(p.id, p.name) }; }
-        catch { return null; }
-      })
-    );
-
-    for (const pd of playerData.filter(Boolean)) {
-      const label = pd.player + "'s story";
-
-      // Pass 1 — YAML fields: open_interactions, tension_threads, must_not_forget
-      // This is where most session NPCs live in structured handoffs
-      for (const npc of extractNPCsFromYamlHandoff(pd.data.handoff, label))
-        addNPC(npc, label);
-
-      // Pass 2 — Markdown tables + bold-list entries across all fetched text
-      // Covers story threads with explicit NPC tables and any non-YAML content
-      const fullText = [
-        pd.data.handoff          || '',
-        pd.data.interactionQueue || '',
-        pd.data.history          || '',
-      ].join('\n\n');
-      for (const npc of parseNPCsFromText(fullText, label))
-        addNPC(npc, label);
-    }
-
-    // Sort: active (1) first, gone (2) next, deceased (3) last; alpha within each group
-    return [...roster.values()].sort((a, b) => {
+    return npcs.sort((a, b) => {
       const ra = STATUS_RANK[a.status] || 0;
       const rb = STATUS_RANK[b.status] || 0;
       return ra !== rb ? ra - rb : a.name.localeCompare(b.name);
@@ -608,10 +380,13 @@ function renderNPCRoster(npcs) {
     return `
     <div class="npc-card${isGone ? ' npc-card-gone' : ''}">
       <div class="npc-name">${esc(npc.name)}</div>
+      ${npc.hub ? `<div class="npc-hub">${esc(npc.hub)}</div>` : ''}
+      ${npc.role ? `<div class="npc-role">${esc(npc.role)}</div>` : ''}
       <div class="npc-badges">
         ${npc.faction ? `<span class="${factionClass(npc.faction)}">${esc(npc.faction)}</span>` : ''}
         <span class="npc-status npc-status-${npc.status}">${statusLabel[npc.status] || 'Active'}</span>
       </div>
+      ${npc.playerInteraction ? `<div class="npc-interaction">${esc(npc.playerInteraction)}</div>` : ''}
     </div>`;
   };
 
@@ -1264,13 +1039,94 @@ function splitMarkdownSections(text) {
   return { preamble: '', sections: [text] };
 }
 
+// ── Active Threats ───────────────────────────────────────────────────
+
+function parseThreats(text) {
+  if (!text || !text.trim()) return [];
+  try {
+    const data = JSON.parse(text);
+    const raw = Array.isArray(data) ? data : (data.arcs || []);
+    const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+    return raw.map(arc => ({
+      id:          (arc.id || '').replace(/^arc-0*/i, '').padStart(3, '0'),
+      name:        arc.name || '',
+      type:        cap(arc.type || ''),
+      escalation:  cap(arc.escalation || ''),
+      status:      cap(arc.status || ''),
+      description: arc.summary || '',
+      hubs:        Array.isArray(arc.hubs) ? arc.hubs : [],
+      players:     Array.isArray(arc.players_involved) ? arc.players_involved : [],
+      keyNpcs:     Array.isArray(arc.key_npcs) ? arc.key_npcs : [],
+      mcNotes:     arc.mc_notes || '',
+    }));
+  } catch (e) {
+    console.warn('parseThreats: JSON parse failed', e);
+    return [];
+  }
+}
+
+function renderThreats(arcs) {
+  if (!arcs.length) return '<p class="empty-note">No active threats found.</p>';
+
+  const TIER_ORDER = ['Critical', 'Elevated', 'Simmering'];
+  const groups = new Map();
+  for (const arc of arcs) {
+    const tier = arc.escalation || 'Other';
+    if (!groups.has(tier)) groups.set(tier, []);
+    groups.get(tier).push(arc);
+  }
+  const ordered = [...groups.entries()].sort(([a], [b]) => {
+    const ia = TIER_ORDER.indexOf(a), ib = TIER_ORDER.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+
+  const tag = (label, cls = '') =>
+    `<span class="threat-tag${cls ? ' ' + cls : ''}">${esc(label)}</span>`;
+
+  const arcCard = arc => {
+    const slug = (arc.escalation || 'other').toLowerCase();
+    const meta = [arc.type, arc.status].filter(Boolean)
+      .map(s => `<span class="threat-meta-item">${esc(s)}</span>`).join('<span class="threat-meta-sep">·</span>');
+    const tags = [
+      ...arc.hubs.map(h => tag(h)),
+      ...arc.players.map(p => tag(p, 'threat-tag-player')),
+      ...arc.keyNpcs.map(n => tag(n, 'threat-tag-npc')),
+    ].join('');
+    return `
+    <div class="threat-card threat-escalation-${slug}">
+      <div class="threat-header">
+        <span class="threat-id">Arc-${arc.id}</span>
+        <span class="threat-name">${esc(arc.name)}</span>
+        <span class="threat-badge threat-badge-${slug}">${esc(arc.escalation)}</span>
+      </div>
+      ${meta ? `<div class="threat-meta">${meta}</div>` : ''}
+      ${arc.description ? `<div class="threat-desc">${esc(arc.description)}</div>` : ''}
+      ${tags ? `<div class="threat-tags">${tags}</div>` : ''}
+      ${arc.mcNotes ? `
+        <details class="threat-mc-notes">
+          <summary>MC Notes</summary>
+          <div class="threat-mc-body">${esc(arc.mcNotes)}</div>
+        </details>` : ''}
+    </div>`;
+  };
+
+  return ordered.map(([tier, tierArcs]) => `
+    <div class="threat-group">
+      <div class="threat-group-label">${esc(tier)}</div>
+      ${tierArcs.map(arcCard).join('')}
+    </div>`).join('');
+}
+
 // ── Page: Events ─────────────────────────────────────────────────────
 async function renderEvents() {
-  setSideNav([{ title: 'Events', items: [{ href: '#/events', label: 'Full Log' }] }]);
+  setSideNav([{ title: 'Events', items: [
+    { href: '#', label: 'Active Threats', scrollTo: 'events-threats' },
+    { href: '#', label: 'Events Log',     scrollTo: 'events-log'     },
+  ]}]);
   showLoading('Unrolling the chronicle\u2026');
 
-  let log = '';
-  try { log = await getEventsLog(); }
+  let log = '', threatsDoc = '';
+  try { [log, threatsDoc] = await Promise.all([getEventsLog(), getThreatsDoc()]); }
   catch (e) { showError('Could not load events', e.message, true); return; }
 
   let body = '';
@@ -1315,12 +1171,23 @@ async function renderEvents() {
     }
   }
 
+  const arcs = parseThreats(threatsDoc);
+
   $content.innerHTML = `
     <div class="page-header">
-      <h1>Public Events Log</h1>
-      <p>The city&rsquo;s memory. Append-only. Everything that happened, happened.</p>
+      <h1>Events</h1>
+      <p>The city&rsquo;s open wounds and its append-only memory.</p>
     </div>
-    <div class="card">${body}</div>`;
+    <div class="page-stack">
+      <div class="card" id="events-threats">
+        <h2>Active Threats &amp; Story Arcs</h2>
+        ${renderThreats(arcs)}
+      </div>
+      <div class="card" id="events-log">
+        <h2>Public Events Log</h2>
+        ${body}
+      </div>
+    </div>`;
 }
 
 // ── Router ───────────────────────────────────────────────────────────
@@ -1402,6 +1269,218 @@ updateTopNav = function() {
 // ── Boot ─────────────────────────────────────────────────────────────
 window.addEventListener('hashchange', render);
 render();
+
+// ── Search ───────────────────────────────────────────────────────────
+(function () {
+  const $overlay  = document.getElementById('search-overlay');
+  const $input    = document.getElementById('search-input');
+  const $results  = document.getElementById('search-results');
+  const $btn      = document.getElementById('search-btn');
+
+  let _index = null;
+  let _building = false;
+  let _debounce = null;
+
+  // ── Index builder ────────────────────────────────────────────────
+  async function buildIndex() {
+    if (_index) return _index;
+    if (_building) return null;
+    _building = true;
+    try {
+      const [npcs, threatsText, hubDocs, playerFolders] = await Promise.all([
+        getAllNPCRoster(),
+        getThreatsDoc(),
+        getHubDocs(),
+        getPlayerFolders(),
+      ]);
+
+      _index = [];
+
+      for (const npc of npcs) {
+        const statusNote = npc.status !== 'active' ? npc.status : '';
+        _index.push({
+          type: 'npc',
+          title: npc.name,
+          sub: [npc.hub, npc.faction, statusNote].filter(Boolean).join(' · '),
+          haystack: [npc.name, npc.hub, npc.faction, npc.role, npc.playerInteraction, npc.status].join(' ').toLowerCase(),
+          nav: '/city', scrollTo: 'city-npcs',
+        });
+      }
+
+      for (const arc of parseThreats(threatsText)) {
+        _index.push({
+          type: 'arc',
+          title: arc.name,
+          sub: [arc.escalation, arc.type].filter(Boolean).join(' · '),
+          haystack: [arc.name, arc.escalation, arc.type, arc.status, arc.description,
+            ...arc.hubs, ...arc.players, ...arc.keyNpcs].join(' ').toLowerCase(),
+          nav: '/events', scrollTo: 'events-threats',
+        });
+      }
+
+      for (const hub of hubDocs) {
+        _index.push({
+          type: 'hub',
+          title: hub.name,
+          sub: 'Location',
+          haystack: hub.name.toLowerCase(),
+          nav: '/city',
+          scrollTo: 'hub-' + hub.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+        });
+      }
+
+      for (const p of playerFolders.filter(p => p.name)) {
+        _index.push({
+          type: 'character',
+          title: p.name,
+          sub: 'Character',
+          haystack: p.name.toLowerCase(),
+          nav: `/characters/${encodeURIComponent(p.name)}`, scrollTo: null,
+        });
+      }
+
+      return _index;
+    } finally {
+      _building = false;
+    }
+  }
+
+  // ── Scoring & search ─────────────────────────────────────────────
+  function search(query) {
+    if (!_index) return null; // still loading
+    const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    if (!terms.length) return [];
+
+    return _index
+      .map(item => {
+        const tl = item.title.toLowerCase();
+        let score = 0;
+        for (const t of terms) {
+          if (tl === t)              score += 20;
+          else if (tl.startsWith(t)) score += 12;
+          else if (tl.includes(t))   score += 8;
+          if ((item.sub || '').toLowerCase().includes(t)) score += 3;
+          if (item.haystack.includes(t))                  score += 1;
+        }
+        return { item, score };
+      })
+      .filter(r => r.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 14)
+      .map(r => r.item);
+  }
+
+  // ── Render ───────────────────────────────────────────────────────
+  const TYPE_LABELS = { npc: 'NPC', arc: 'Arc', hub: 'Hub', character: 'PC' };
+
+  function renderResults(results, query) {
+    if (results === null) {
+      $results.innerHTML = `<div class="search-loading">Indexing…</div>`;
+      return;
+    }
+    if (!query.trim()) { $results.innerHTML = ''; return; }
+    if (!results.length) {
+      $results.innerHTML = `<div class="search-empty">No results for &ldquo;${esc(query)}&rdquo;</div>`;
+      return;
+    }
+
+    // Group by type in display order
+    const ORDER = ['character', 'npc', 'arc', 'hub'];
+    const groups = new Map();
+    for (const item of results) {
+      if (!groups.has(item.type)) groups.set(item.type, []);
+      groups.get(item.type).push(item);
+    }
+    const sorted = [...groups.entries()].sort(([a], [b]) => ORDER.indexOf(a) - ORDER.indexOf(b));
+
+    $results.innerHTML = sorted.map(([type, items]) => `
+      <div class="search-group-label">${TYPE_LABELS[type] || type}</div>
+      ${items.map(item => `
+        <button class="search-result"
+          data-nav="${esc(item.nav)}"
+          ${item.scrollTo ? `data-scroll-after="${esc(item.scrollTo)}"` : ''}>
+          <span class="search-result-type search-result-type-${type}">${TYPE_LABELS[type] || type}</span>
+          <span class="search-result-body">
+            <span class="search-result-title">${esc(item.title)}</span>
+            ${item.sub ? `<span class="search-result-sub">${esc(item.sub)}</span>` : ''}
+          </span>
+        </button>`).join('')}
+    `).join('');
+  }
+
+  // ── Open / close ─────────────────────────────────────────────────
+  function openSearch() {
+    $overlay.classList.add('open');
+    $input.value = '';
+    $results.innerHTML = '';
+    $input.focus();
+    // Kick off index build (no-op if already built)
+    buildIndex().then(() => {
+      // Re-run search if user already typed while index was building
+      if ($input.value.trim()) runSearch($input.value);
+    });
+  }
+
+  function closeSearch() {
+    $overlay.classList.remove('open');
+    $input.blur();
+  }
+
+  function runSearch(query) {
+    const results = search(query);
+    renderResults(results, query);
+  }
+
+  // ── Event wiring ─────────────────────────────────────────────────
+  $btn.addEventListener('click', () => {
+    $overlay.classList.contains('open') ? closeSearch() : openSearch();
+  });
+
+  $overlay.addEventListener('click', e => {
+    if (e.target === $overlay) closeSearch();
+  });
+
+  $input.addEventListener('input', () => {
+    clearTimeout(_debounce);
+    _debounce = setTimeout(() => runSearch($input.value), 120);
+  });
+
+  $input.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { e.preventDefault(); closeSearch(); }
+  });
+
+  // Result click — navigate then optionally scroll
+  $results.addEventListener('click', e => {
+    const btn = e.target.closest('.search-result');
+    if (!btn) return;
+    closeSearch();
+    navigate(btn.dataset.nav);
+    const scrollTarget = btn.dataset.scrollAfter;
+    if (scrollTarget) {
+      // Wait for the page to render, then scroll
+      setTimeout(() => {
+        const el = document.getElementById(scrollTarget);
+        if (el) {
+          const navH = document.getElementById('top-nav').offsetHeight;
+          window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - navH - 12, behavior: 'smooth' });
+        }
+      }, 600);
+    }
+  });
+
+  // Global `/` shortcut to open search
+  document.addEventListener('keydown', e => {
+    if (e.key === '/' && !e.ctrlKey && !e.metaKey) {
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      e.preventDefault();
+      openSearch();
+    }
+    if (e.key === 'Escape' && $overlay.classList.contains('open')) {
+      closeSearch();
+    }
+  });
+}());
 
 // ── Dice Roller ───────────────────────────────────────────────────────
 (function () {

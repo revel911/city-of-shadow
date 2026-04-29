@@ -31,6 +31,13 @@
 
     <span class="nav-refresh" id="refresh-btn">↻ Refresh</span>
 
+    <button id="search-btn" aria-label="Search (press /)" title="Search (/)">
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+        <circle cx="6.5" cy="6.5" r="4.5"/>
+        <line x1="10" y1="10" x2="13.5" y2="13.5"/>
+      </svg>
+    </button>
+
     <!-- Hamburger (mobile only) -->
     <button id="nav-toggle" aria-label="Toggle menu">
       <span></span><span></span><span></span>
@@ -47,6 +54,21 @@
 
   <!-- Tap outside to close -->
   <div id="nav-overlay"></div>
+
+  <!-- Search overlay -->
+  <div id="search-overlay" role="dialog" aria-label="Search">
+    <div id="search-box">
+      <div id="search-input-wrap">
+        <svg id="search-icon" width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+          <circle cx="6.5" cy="6.5" r="4.5"/>
+          <line x1="10" y1="10" x2="13.5" y2="13.5"/>
+        </svg>
+        <input id="search-input" type="search" placeholder="Search NPCs, arcs, hubs, characters…" autocomplete="off" spellcheck="false" />
+        <kbd id="search-esc-hint">Esc</kbd>
+      </div>
+      <div id="search-results" role="listbox"></div>
+    </div>
+  </div>
 
   <div id="app">
     <aside id="side-nav"></aside>
